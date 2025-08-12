@@ -65,9 +65,76 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
         revokeRole(PAUSER_ROLE, _account);
     }
 
+    // Resolve TWAP period (override or provider default)
     function _resolveTwapPeriod() internal view returns (uint32 p) {
         p = twapPeriod == 0 ? twapProvider.defaultTwapPeriod() : twapPeriod;
     }
+
+    // Normalize token: map address(0) to WETH
+    function _normalizeToken(address token) internal view returns (address) {
+        return token == address(0) ? address(wETH) : token;
+    }
+
+    // Pull funds from user; if isNative==true we expect ETH and wrap to WETH
+    function _takeFunds(address actualToken, uint256 amount, bool isNative) internal {
+        if (isNative) {
+            require(msg.value == amount, "ETH amount mismatch");
+            wETH.deposit{value: amount}();
+        } else {
+            require(msg.value == 0, "ETH not expected");
+            TransferHelper.safeTransferFrom(actualToken, msg.sender, address(this), amount);
+        }
+    }
+
+    // Send funds to user; if toNative==true we unwrap WETH to ETH
+    function _sendFunds(address actualToken, address to, uint256 amount, bool toNative) internal {
+        if (toNative) {
+            wETH.withdraw(amount);
+            TransferHelper.safeTransferETH(to, amount);
+        } else {
+            TransferHelper.safeTransfer(actualToken, to, amount);
+        }
+    }
+
+    // Approve router to spend `amount` of `token`
+    function _approveToken(address token, uint256 amount) internal {
+        TransferHelper.safeApprove(token, address(router), amount);
+    }
+
+    // TWAP helpers
+    function _twapMinOut(address tokenIn, address tokenOut, uint256 amountIn, uint24 poolFee)
+        internal
+        view
+        returns (uint256 minOut)
+    {
+        require(amountIn <= type(uint128).max, "amountIn too large");
+        (uint256 twapOut, ) = twapProvider.getTwapPrice(
+            tokenIn,
+            tokenOut,
+            uint128(amountIn),
+            poolFee,
+            _resolveTwapPeriod()
+        );
+        minOut = (twapOut * (10_000 - twapSlippageBps)) / 10_000;
+    }
+
+    function _twapMaxIn(address tokenIn, address tokenOut, uint256 amountOut, uint24 poolFee)
+        internal
+        view
+        returns (uint256 maxIn)
+    {
+        require(amountOut <= type(uint128).max, "amountOut too large");
+        (uint256 twapIn, ) = twapProvider.getTwapPrice(
+            /* _tokenIn  */ tokenOut,
+            /* _tokenOut */ tokenIn,
+            uint128(amountOut),
+            poolFee,
+            _resolveTwapPeriod()
+        );
+        maxIn = (twapIn * (10_000 + twapSlippageBps)) / 10_000;
+    }
+
+    /* --------------------------- Single-hop swaps --------------------------- */
 
     function swapExactInputSingle(
         address tokenIn,
@@ -82,8 +149,10 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
         require(poolFee == 500 || poolFee == 3000 || poolFee == 10000, "Invalid pool fee");
         require(deadline >= block.timestamp, "Deadline passed");
 
-        address actualTokenIn = tokenIn == address(0) ? address(wETH) : tokenIn;
-        address actualTokenOut = tokenOut == address(0) ? address(wETH) : tokenOut;
+        bool isNativeIn  = (tokenIn  == address(0));
+        bool isNativeOut = (tokenOut == address(0));
+        address actualTokenIn  = _normalizeToken(tokenIn);
+        address actualTokenOut = _normalizeToken(tokenOut);
 
         require(twapProvider.isPairSupported(actualTokenIn, actualTokenOut, poolFee), "Token pair not allowed");
 
@@ -91,15 +160,8 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
             amountOutMinimum = _twapMinOut(actualTokenIn, actualTokenOut, amountIn, poolFee);
         }
 
-        if (tokenIn == address(0)) {
-            require(msg.value == amountIn, "ETH amount mismatch");
-            wETH.deposit{value: amountIn}();
-        } else {
-            require(msg.value == 0, "ETH not expected");
-            TransferHelper.safeTransferFrom(actualTokenIn, msg.sender, address(this), amountIn);
-        }
-
-        TransferHelper.safeApprove(actualTokenIn, address(router), amountIn);
+        _takeFunds(actualTokenIn, amountIn, isNativeIn);
+        _approveToken(actualTokenIn, amountIn);
 
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({
             tokenIn: actualTokenIn,
@@ -114,17 +176,10 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
 
         amountOut = router.exactInputSingle(params);
 
-        TransferHelper.safeApprove(actualTokenIn, address(router), 0);
-
+        _approveToken(actualTokenIn, 0);
         require(amountOut >= amountOutMinimum, "Slippage limit exceeded");
 
-        // If tokenOut is WETH but user wants ETH, unwrap and send ETH back
-        if (tokenOut == address(0)) {
-            wETH.withdraw(amountOut);
-            TransferHelper.safeTransferETH(msg.sender, amountOut);
-        } else {
-            TransferHelper.safeTransfer(actualTokenOut, msg.sender, amountOut);
-        }
+        _sendFunds(actualTokenOut, msg.sender, amountOut, isNativeOut);
 
         emit SwapExecuted(msg.sender, tokenIn, tokenOut, amountIn, amountOut);
     }
@@ -142,8 +197,10 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
         require(amountOut > 0, "amountOut must be greater than zero");
         require(poolFee == 500 || poolFee == 3000 || poolFee == 10000, "Invalid pool fee");
 
-        address actualTokenIn = tokenIn == address(0) ? address(wETH) : tokenIn;
-        address actualTokenOut = tokenOut == address(0) ? address(wETH) : tokenOut;
+        bool isNativeIn  = (tokenIn  == address(0));
+        bool isNativeOut = (tokenOut == address(0));
+        address actualTokenIn  = _normalizeToken(tokenIn);
+        address actualTokenOut = _normalizeToken(tokenOut);
 
         require(twapProvider.isPairSupported(actualTokenIn, actualTokenOut, poolFee), "Token pair not allowed");
 
@@ -152,18 +209,9 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
         }
         require(amountInMaximum > 0, "amountInMaximum is zero");
 
-        if (tokenIn == address(0)) {
-            // Input is native ETH
-            require(msg.value == amountInMaximum, "Insufficient ETH sent");
-            wETH.deposit{value: amountInMaximum}();
-        } else {
-            // Input is ERC20 token: transfer max amountInMaximum
-            require(msg.value == 0, "ETH not expected");
-            TransferHelper.safeTransferFrom(actualTokenIn, msg.sender, address(this), amountInMaximum);
-        }
+        _takeFunds(actualTokenIn, amountInMaximum, isNativeIn);
+        _approveToken(actualTokenIn, amountInMaximum);
 
-        // Approve router to spend tokenIn (WETH if native ETH)
-        TransferHelper.safeApprove(actualTokenIn, address(router), amountInMaximum);
         ISwapRouter.ExactOutputSingleParams memory params = ISwapRouter.ExactOutputSingleParams({
             tokenIn: actualTokenIn,
             tokenOut: actualTokenOut,
@@ -177,28 +225,15 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
 
         amountIn = router.exactOutputSingle(params);
 
-        TransferHelper.safeApprove(actualTokenIn, address(router), 0);
+        _approveToken(actualTokenIn, 0);
 
-        // Refund leftover input tokens if any
+        // Refund leftover input
         if (amountIn < amountInMaximum) {
-            uint256 refund = amountInMaximum - amountIn;
-            if (tokenIn == address(0)) {
-                wETH.withdraw(refund);
-                TransferHelper.safeTransferETH(msg.sender, refund);
-            } else {
-                // Refund ERC20
-                TransferHelper.safeTransfer(actualTokenIn, msg.sender, refund);
-            }
+            _sendFunds(actualTokenIn, msg.sender, amountInMaximum - amountIn, isNativeIn);
         }
 
-        // If tokenOut is native ETH, unwrap and send ETH to user
-        if (tokenOut == address(0)) {
-            wETH.withdraw(amountOut);
-            TransferHelper.safeTransferETH(msg.sender, amountOut);
-        } else {
-            // Transfer tokenOut to user
-            TransferHelper.safeTransfer(actualTokenOut, msg.sender, amountOut);
-        }
+        // Deliver exact output
+        _sendFunds(actualTokenOut, msg.sender, amountOut, isNativeOut);
 
         emit SwapExecuted(msg.sender, tokenIn, tokenOut, amountIn, amountOut);
     }
@@ -365,36 +400,6 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
         }
 
         path = tempPath;
-    }
-
-    function _twapMinOut(address tokenIn, address tokenOut, uint256 amountIn, uint24 poolFee)
-        internal
-        view
-        returns (uint256 minOut)
-    {
-        require(amountIn <= type(uint128).max, "amountIn too large");
-        (uint256 twapOut,) =
-            twapProvider.getTwapPrice(tokenIn, tokenOut, uint128(amountIn), poolFee, _resolveTwapPeriod());
-        minOut = (twapOut * (10_000 - twapSlippageBps)) / 10_000;
-    }
-
-    // Derive maxIn from TWAP for exact-output (invert the quote)
-    function _twapMaxIn(address tokenIn, address tokenOut, uint256 amountOut, uint24 poolFee)
-        internal
-        view
-        returns (uint256 maxIn)
-    {
-        require(amountOut <= type(uint128).max, "amountOut too large");
-        (uint256 twapIn,) = twapProvider.getTwapPrice(
-            /* _tokenIn  */
-            tokenOut,
-            /* _tokenOut */
-            tokenIn,
-            uint128(amountOut),
-            poolFee,
-            _resolveTwapPeriod()
-        );
-        maxIn = (twapIn * (10_000 + twapSlippageBps)) / 10_000;
     }
 
     // Function to receive ETH when WETH is withdrawn
