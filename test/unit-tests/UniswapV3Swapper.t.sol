@@ -149,6 +149,30 @@ contract UniswapV3SwapperTest is Test {
         swapper.revokePauserRole(address(0));
     }
 
+    function testSetTwapPeriod_SUCCESS() public {
+        vm.prank(admin);
+        swapper.setTwapPeriod(100);
+        assertEq(uint256(swapper.twapPeriod()), 100);
+    }
+
+    function testSetTwapPeriod_RevertsZero() public {
+        vm.prank(admin);
+        vm.expectRevert("TWAP period must be greater than 0");
+        swapper.setTwapPeriod(0);
+    }
+
+    function testSetTwapSlippageBps_SUCCESS() public {
+        vm.prank(admin);
+        swapper.setTwapSlippageBps(100);
+        assertEq(swapper.twapSlippageBps(), 100);
+    }
+
+    function testSetTwapSlippageBps_RevertsGreaterThan10000() public { 
+        vm.prank(admin);
+        vm.expectRevert("TWAP slippage buffer must be less than or equal to 100%");
+        swapper.setTwapSlippageBps(10001);
+    }
+
     function testSwapExactInput_WithERCTokens_Success() public {
         uint256 amountIn = 1000;
         uint256 amountOutMinimum = 900;
@@ -1699,9 +1723,8 @@ contract UniswapV3SwapperTest is Test {
         uint32 newPeriod = 0;
 
         vm.prank(admin);
+        vm.expectRevert("TWAP period must be greater than 0");
         swapper.setTwapPeriod(newPeriod);
-
-        assertEq(uint256(swapper.twapPeriod()), uint256(newPeriod));
     }
 
     function testSetTwapPeriod_WithMaxPeriod() public {

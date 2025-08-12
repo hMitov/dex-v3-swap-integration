@@ -99,7 +99,17 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
      * @param _twapPeriod The TWAP period in seconds
      */
     function setTwapPeriod(uint32 _twapPeriod) external override onlyAdmin {
+        require(_twapPeriod > 0, "TWAP period must be greater than 0");
         twapPeriod = _twapPeriod;
+    }
+
+    /**
+     * @notice Set the TWAP slippage buffer in basis points (only admin role)
+     * @param _twapSlippageBps The TWAP slippage buffer in basis points
+     */
+    function setTwapSlippageBps(uint256 _twapSlippageBps) external override onlyAdmin {
+        require(_twapSlippageBps <= 10000, "TWAP slippage buffer must be less than or equal to 100%");
+        twapSlippageBps = _twapSlippageBps;
     }
 
     /**

@@ -28,6 +28,9 @@ interface IUniswapV3Swapper {
     /// @notice Sets the TWAP period
     function setTwapPeriod(uint32 twapPeriod) external;
 
+    /// @notice Sets the TWAP slippage buffer in basis points
+    function setTwapSlippageBps(uint256 twapSlippageBps) external;
+
     /// @notice Swaps an exact amount of input token for a minimum amount of output token in a single pool
     /// @return amountOut The amount of output token received
     function swapExactInputSingle(
