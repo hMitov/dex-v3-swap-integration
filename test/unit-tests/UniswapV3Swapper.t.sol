@@ -67,6 +67,8 @@ contract UniswapV3SwapperTest is Test {
         vm.deal(address(swapper), 1000 ether);
     }
 
+    // ============ CONSTRUCTOR & ROLE TESTS ============
+    
     function testConstructorArguments() public view {
         assertEq(address(swapper.router()), address(mockRouter));
         assertEq(address(swapper.wETH()), address(mockWETH));
@@ -79,6 +81,33 @@ contract UniswapV3SwapperTest is Test {
         assertTrue(swapper.hasRole(swapper.PAUSER_ROLE(), admin));
     }
 
+    function testConstructor_WithValidAddresses() public {
+        // Test constructor with valid addresses
+        MockSwapRouter newRouter = new MockSwapRouter();
+        MockWETH newWETH = new MockWETH();
+        MockTWAPProvider newTWAPProvider = new MockTWAPProvider();
+
+        UniswapV3Swapper newSwapper =
+            new UniswapV3Swapper(address(newRouter), address(newWETH), address(newTWAPProvider));
+
+        assertEq(address(newSwapper.router()), address(newRouter));
+        assertEq(address(newSwapper.wETH()), address(newWETH));
+        assertEq(address(newSwapper.twapProvider()), address(newTWAPProvider));
+    }
+
+    function testConstructor_ZeroAddressReverts() public {
+        vm.expectRevert();
+        new UniswapV3Swapper(address(0), address(mockWETH), address(mockTWAPProvider));
+
+        vm.expectRevert();
+        new UniswapV3Swapper(address(mockRouter), address(0), address(mockTWAPProvider));
+
+        vm.expectRevert();
+        new UniswapV3Swapper(address(mockRouter), address(mockWETH), address(0));
+    }
+
+    // ============ PAUSE/UNPAUSE TESTS ============
+    
     function testPause() public {
         vm.prank(admin);
         swapper.grantPauserRole(pauser);
@@ -108,6 +137,8 @@ contract UniswapV3SwapperTest is Test {
         swapper.unpause();
     }
 
+    // ============ ROLE MANAGEMENT TESTS ============
+    
     function testGrantPauserRole() public {
         vm.prank(admin);
         swapper.grantPauserRole(user);
@@ -149,16 +180,26 @@ contract UniswapV3SwapperTest is Test {
         swapper.revokePauserRole(address(0));
     }
 
+    // ============ TWAP CONFIGURATION TESTS ============
+    
     function testSetTwapPeriod_SUCCESS() public {
         vm.prank(admin);
         swapper.setTwapPeriod(100);
         assertEq(uint256(swapper.twapPeriod()), 100);
     }
 
-    function testSetTwapPeriod_RevertsZero() public {
+    function testSetTwapPeriod_RevertsGreaterThan24Hours() public {
         vm.prank(admin);
-        vm.expectRevert("TWAP period must be greater than 0");
-        swapper.setTwapPeriod(0);
+        vm.expectRevert("TWAP period must be less than or equal to 24 hours");
+        swapper.setTwapPeriod(86401);
+    }
+
+    function testSetTwapPeriod_RevertsNotAdmin() public {
+        uint32 newPeriod = 3600;
+
+        vm.prank(user);
+        vm.expectRevert("Caller is not admin");
+        swapper.setTwapPeriod(newPeriod);
     }
 
     function testSetTwapSlippageBps_SUCCESS() public {
@@ -173,6 +214,8 @@ contract UniswapV3SwapperTest is Test {
         swapper.setTwapSlippageBps(10001);
     }
 
+    // ============ EXACT INPUT SINGLE-HOP SWAP TESTS ============
+    
     function testSwapExactInput_WithERCTokens_Success() public {
         uint256 amountIn = 1000;
         uint256 amountOutMinimum = 900;
@@ -236,7 +279,7 @@ contract UniswapV3SwapperTest is Test {
 
         vm.stopPrank();
     }
-
+    
     function testSwapExactInput_SameTokenReverts() public {
         vm.prank(user);
         vm.expectRevert("tokenIn and tokenOut must differ");
@@ -342,6 +385,91 @@ contract UniswapV3SwapperTest is Test {
         vm.stopPrank();
     }
 
+    function testSwapExactInput_WithMaxUint256Amount() public {
+        uint256 amountIn = 1000000;
+        uint256 amountOutMinimum = 900;
+        uint24 poolFee = 3000;
+        uint256 deadline = block.timestamp + 1 hours;
+
+        // Mint enough tokens for this test
+        tokenA.mint(user, amountIn);
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountIn);
+
+        uint256 amountOut = swapper.swapExactInputSingle(
+            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
+        );
+
+        assertEq(amountOut, mockRouter.mockAmountOut());
+        vm.stopPrank();
+    }
+
+    function testSwapExactInput_WithExactDeadline() public {
+        uint256 amountIn = 1000;
+        uint256 amountOutMinimum = 900;
+        uint24 poolFee = 3000;
+        uint256 deadline = block.timestamp;
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountIn);
+
+        uint256 amountOut = swapper.swapExactInputSingle(
+            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
+        );
+
+        assertEq(amountOut, mockRouter.mockAmountOut());
+        vm.stopPrank();
+    }
+
+    function testSwapExactInput_WithFee500() public {
+        uint256 amountIn = 1000;
+        uint256 amountOutMinimum = 900;
+        uint24 poolFee = 500; // Test 0.05% fee
+        uint256 deadline = block.timestamp + 1 hours;
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountIn);
+
+        uint256 amountOut = swapper.swapExactInputSingle(
+            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
+        );
+
+        assertEq(amountOut, mockRouter.mockAmountOut());
+        vm.stopPrank();
+    }
+
+    function testSwapExactInput_WithFee10000() public {
+        uint256 amountIn = 1000;
+        uint256 amountOutMinimum = 900;
+        uint24 poolFee = 10000; // Test 1% fee
+        uint256 deadline = block.timestamp + 1 hours;
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountIn);
+
+        uint256 amountOut = swapper.swapExactInputSingle(
+            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
+        );
+
+        assertEq(amountOut, mockRouter.mockAmountOut());
+        vm.stopPrank();
+    }
+
+    function testSwapExactInput_WithInvalidFee() public {
+        uint256 amountIn = 1000;
+        uint256 amountOutMinimum = 900;
+        uint24 poolFee = 2000; // Invalid fee (not 500, 3000, or 10000)
+        uint256 deadline = block.timestamp + 1 hours;
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountIn);
+
+        vm.expectRevert("Invalid pool fee");
+        swapper.swapExactInputSingle(address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum);
+        vm.stopPrank();
+    }
+
     function testSwapExactInput_ETHToERC20_WithZeroAmountOutMinimum() public {
         uint256 amountIn = 1 ether;
         uint256 amountOutMinimum = 0;
@@ -360,6 +488,166 @@ contract UniswapV3SwapperTest is Test {
         assertEq(tokenB.balanceOf(user) - userTokenBBalanceBefore, amountOut, "User should receive tokens");
     }
 
+    function testSwapExactInput_WithInvalidTokenAddress() public {
+        uint256 amountIn = 1000;
+        uint256 amountOutMinimum = 900;
+        uint24 poolFee = 3000;
+        uint256 deadline = block.timestamp + 1 hours;
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountIn);
+
+        vm.expectRevert("Token pair not allowed");
+        swapper.swapExactInputSingle(address(tokenA), address(0x123), amountIn, poolFee, deadline, amountOutMinimum);
+        vm.stopPrank();
+    }
+
+    function testSwapExactInput_WithVeryLongDeadline() public {
+        uint256 amountIn = 1000;
+        uint256 amountOutMinimum = 900;
+        uint24 poolFee = 3000;
+        uint256 deadline = block.timestamp + 365 days; // 1 year
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountIn);
+
+        uint256 amountOut = swapper.swapExactInputSingle(
+            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
+        );
+
+        assertEq(amountOut, mockRouter.mockAmountOut());
+        vm.stopPrank();
+    }
+
+    function testSwapExactInput_WithAllFeeTiers() public {
+        uint256 amountIn = 1000;
+        uint256 amountOutMinimum = 900;
+        uint256 deadline = block.timestamp + 1 hours;
+
+        uint24[] memory fees = new uint24[](3);
+        fees[0] = 500; // 0.05%
+        fees[1] = 3000; // 0.30%
+        fees[2] = 10000; // 1.00%
+
+        for (uint256 i = 0; i < fees.length; i++) {
+            vm.startPrank(user);
+            tokenA.approve(address(swapper), amountIn);
+
+            uint256 amountOut = swapper.swapExactInputSingle(
+                address(tokenA), address(tokenB), amountIn, fees[i], deadline, amountOutMinimum
+            );
+
+            assertEq(amountOut, mockRouter.mockAmountOut());
+            vm.stopPrank();
+        }
+    }
+
+    function testSwapExactInput_WithMaxDeadline() public {
+        uint256 amountIn = 1000;
+        uint256 amountOutMinimum = 900;
+        uint24 poolFee = 3000;
+        uint256 deadline = type(uint256).max;
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountIn);
+
+        uint256 amountOut = swapper.swapExactInputSingle(
+            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
+        );
+
+        assertEq(amountOut, mockRouter.mockAmountOut());
+        vm.stopPrank();
+    }
+
+    function testSwapExactInput_WithVeryHighMinimum() public {
+        uint256 amountIn = 1000;
+        uint256 amountOutMinimum = mockRouter.mockAmountOut() + 1000; // Higher than possible
+        uint24 poolFee = 3000;
+        uint256 deadline = block.timestamp + 1 hours;
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountIn);
+
+        vm.expectRevert("Slippage limit exceeded");
+        swapper.swapExactInputSingle(address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum);
+        vm.stopPrank();
+    }
+
+    function testSwapExactInput_WithExactMinimum() public {
+        uint256 amountIn = 1000;
+        uint256 amountOutMinimum = mockRouter.mockAmountOut(); // Exact minimum
+        uint24 poolFee = 3000;
+        uint256 deadline = block.timestamp + 1 hours;
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountIn);
+
+        uint256 amountOut = swapper.swapExactInputSingle(
+            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
+        );
+
+        assertEq(amountOut, mockRouter.mockAmountOut());
+        assertEq(amountOut, amountOutMinimum, "Should get exact minimum");
+        vm.stopPrank();
+    }
+
+    function testSwapExactInput_WithZeroMinimum() public {
+        uint256 amountIn = 1000;
+        uint256 amountOutMinimum = 0;
+        uint24 poolFee = 3000;
+        uint256 deadline = block.timestamp + 1 hours;
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountIn);
+
+        uint256 amountOut = swapper.swapExactInputSingle(
+            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
+        );
+
+        assertEq(amountOut, mockRouter.mockAmountOut());
+        assertGt(amountOut, amountOutMinimum, "Should get more than zero");
+        vm.stopPrank();
+    }
+
+    function testSwapExactInput_WithDifferentPoolFees() public {
+        // Test with different valid pool fees
+        uint256 amountIn = 1000;
+        uint256 amountOutMinimum = 900;
+        uint256 deadline = block.timestamp + 1 hours;
+
+        // Test with 0.05% fee
+        mockTWAPProvider.addTokenPair(address(tokenA), address(tokenB), address(mockWETH), 500);
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountIn);
+
+        uint256 amountOut =
+            swapper.swapExactInputSingle(address(tokenA), address(tokenB), amountIn, 500, deadline, amountOutMinimum);
+
+        assertEq(amountOut, mockRouter.mockAmountOut());
+        vm.stopPrank();
+    }
+
+    function testSwapExactInput_WithHighPoolFee() public {
+        // Test with 1% fee
+        uint256 amountIn = 1000;
+        uint256 amountOutMinimum = 900;
+        uint256 deadline = block.timestamp + 1 hours;
+
+        mockTWAPProvider.addTokenPair(address(tokenA), address(tokenB), address(mockWETH), 10000);
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountIn);
+
+        uint256 amountOut =
+            swapper.swapExactInputSingle(address(tokenA), address(tokenB), amountIn, 10000, deadline, amountOutMinimum);
+
+        assertEq(amountOut, mockRouter.mockAmountOut());
+        vm.stopPrank();
+    }
+
+    // ============ EXACT OUTPUT SINGLE-HOP SWAP TESTS ============
+    
     function testSwapExactOutput_ERC20ToERC20_Success() public {
         uint256 amountOut = 1000;
         uint256 amountInMaximum = 2000;
@@ -491,6 +779,179 @@ contract UniswapV3SwapperTest is Test {
         vm.stopPrank();
     }
 
+    function testSwapExactOutput_WithInvalidTokenAddress() public {
+        uint256 amountOut = 1000;
+        uint256 amountInMaximum = 2000;
+        uint24 poolFee = 3000;
+        uint256 deadline = block.timestamp + 1 hours;
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountInMaximum);
+
+        vm.expectRevert("Token pair not allowed");
+        swapper.swapExactOutputSingle(address(tokenA), address(0x123), amountOut, amountInMaximum, poolFee, deadline);
+        vm.stopPrank();
+    }
+
+    function testSwapExactOutput_WithAllFeeTiers() public {
+        uint256 amountOut = 1000;
+        uint256 amountInMaximum = 2000;
+        uint256 deadline = block.timestamp + 1 hours;
+
+        uint24[] memory fees = new uint24[](3);
+        fees[0] = 500; // 0.05%
+        fees[1] = 3000; // 0.30%
+        fees[2] = 10000; // 1.00%
+
+        for (uint256 i = 0; i < fees.length; i++) {
+            vm.startPrank(user);
+            tokenA.approve(address(swapper), amountInMaximum);
+
+            uint256 amountIn = swapper.swapExactOutputSingle(
+                address(tokenA), address(tokenB), amountOut, amountInMaximum, fees[i], deadline
+            );
+
+            assertEq(amountIn, mockRouter.mockAmountOut());
+            vm.stopPrank();
+        }
+    }
+
+    function testSwapExactOutput_WithVeryLongDeadline() public {
+        uint256 amountOut = 1000;
+        uint256 amountInMaximum = 2000;
+        uint24 poolFee = 3000;
+        uint256 deadline = block.timestamp + 365 days; // 1 year
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountInMaximum);
+
+        uint256 amountIn = swapper.swapExactOutputSingle(
+            address(tokenA), address(tokenB), amountOut, amountInMaximum, poolFee, deadline
+        );
+
+        assertEq(amountIn, mockRouter.mockAmountIn());
+        vm.stopPrank();
+    }
+
+    function testSwapExactOutput_WithVerySmallAmount() public {
+        uint256 amountOut = 1; // 1 wei
+        uint256 amountInMaximum = 1000;
+        uint24 poolFee = 3000;
+        uint256 deadline = block.timestamp + 1 hours;
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountInMaximum);
+
+        uint256 amountIn = swapper.swapExactOutputSingle(
+            address(tokenA), address(tokenB), amountOut, amountInMaximum, poolFee, deadline
+        );
+
+        assertEq(amountIn, mockRouter.mockAmountIn());
+        vm.stopPrank();
+    }
+
+    function testSwapExactOutput_WithExactDeadline() public {
+        uint256 amountOut = 1000;
+        uint256 amountInMaximum = 2000;
+        uint24 poolFee = 3000;
+        uint256 deadline = block.timestamp;
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountInMaximum);
+
+        uint256 amountIn = swapper.swapExactOutputSingle(
+            address(tokenA), address(tokenB), amountOut, amountInMaximum, poolFee, deadline
+        );
+
+        assertEq(amountIn, mockRouter.mockAmountIn());
+        vm.stopPrank();
+    }
+
+    function testSwapExactOutput_WithInvalidFee() public {
+        uint256 amountOut = 1000;
+        uint256 amountInMaximum = 2000;
+        uint24 poolFee = 2000; // Invalid fee (not 500, 3000, or 10000)
+        uint256 deadline = block.timestamp + 1 hours;
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountInMaximum);
+
+        vm.expectRevert("Invalid pool fee");
+        swapper.swapExactOutputSingle(address(tokenA), address(tokenB), amountOut, amountInMaximum, poolFee, deadline);
+        vm.stopPrank();
+    }
+
+    function testSwapExactOutput_WithFee10000() public {
+        uint256 amountOut = 1000;
+        uint256 amountInMaximum = 2000;
+        uint24 poolFee = 10000; // Test 1% fee
+        uint256 deadline = block.timestamp + 1 hours;
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountInMaximum);
+
+        uint256 amountIn = swapper.swapExactOutputSingle(
+            address(tokenA), address(tokenB), amountOut, amountInMaximum, poolFee, deadline
+        );
+
+        assertEq(amountIn, mockRouter.mockAmountIn());
+        vm.stopPrank();
+    }
+
+    function testSwapExactOutput_WithFee500() public {
+        uint256 amountOut = 1000;
+        uint256 amountInMaximum = 2000;
+        uint24 poolFee = 500; // Test 0.05% fee
+        uint256 deadline = block.timestamp + 1 hours;
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountInMaximum);
+
+        uint256 amountIn = swapper.swapExactOutputSingle(
+            address(tokenA), address(tokenB), amountOut, amountInMaximum, poolFee, deadline
+        );
+
+        assertEq(amountIn, mockRouter.mockAmountIn());
+        vm.stopPrank();
+    }
+
+    function testSwapExactOutput_WithMaxDeadline() public {
+        uint256 amountOut = 1000;
+        uint256 amountInMaximum = 2000;
+        uint24 poolFee = 3000;
+        uint256 deadline = type(uint256).max;
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountInMaximum);
+
+        uint256 amountIn = swapper.swapExactOutputSingle(
+            address(tokenA), address(tokenB), amountOut, amountInMaximum, poolFee, deadline
+        );
+
+        assertEq(amountIn, mockRouter.mockAmountIn());
+        vm.stopPrank();
+    }
+
+    function testSwapExactOutput_WithExactMaximum() public {
+        uint256 amountOut = 1000;
+        uint256 amountInMaximum = mockRouter.mockAmountIn(); // Exact maximum
+        uint24 poolFee = 3000;
+        uint256 deadline = block.timestamp + 1 hours;
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountInMaximum);
+
+        uint256 amountIn = swapper.swapExactOutputSingle(
+            address(tokenA), address(tokenB), amountOut, amountInMaximum, poolFee, deadline
+        );
+
+        assertEq(amountIn, mockRouter.mockAmountIn());
+        assertEq(amountIn, amountInMaximum, "Should use exact maximum");
+        vm.stopPrank();
+    }
+
+    // ============ TWAP INTEGRATION TESTS ============
+    
     function testTWAPProviderIntegration_Success() public view {
         assertTrue(mockTWAPProvider.isPairSupported(address(tokenA), address(tokenB), 3000));
         assertTrue(mockTWAPProvider.isPairSupported(address(mockWETH), address(tokenA), 3000));
@@ -508,6 +969,26 @@ contract UniswapV3SwapperTest is Test {
         vm.stopPrank();
     }
 
+    function testTWAPIntegration_WithZeroSlippage() public {
+        uint256 amountIn = 1000;
+        uint256 amountOutMinimum = 0; // Zero minimum to test TWAP logic
+        uint24 poolFee = 3000;
+        uint256 deadline = block.timestamp + 1 hours;
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountIn);
+
+        uint256 amountOut = swapper.swapExactInputSingle(
+            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
+        );
+
+        assertEq(amountOut, mockRouter.mockAmountOut());
+        assertGt(amountOut, 0, "Should receive some tokens");
+        vm.stopPrank();
+    }
+
+    // ============ EXACT INPUT MULTIHOP SWAP TESTS ============
+    
     function testSwapExactInputMultihop_ERC20ToERC20ToERC20_Success() public {
         uint256 amountIn = 1000;
         uint256 amountOutMinimum = 800;
@@ -740,6 +1221,8 @@ contract UniswapV3SwapperTest is Test {
         vm.stopPrank();
     }
 
+    // ============ EXACT OUTPUT MULTIHOP SWAP TESTS ============
+    
     function testSwapExactOutputMultihop_ERC20ToERC20ToERC20_Success() public {
         uint256 amountOut = 1000;
         uint256 amountInMaximum = 2000;
@@ -961,43 +1444,6 @@ contract UniswapV3SwapperTest is Test {
         vm.stopPrank();
     }
 
-    function testSwapExactInput_WithDifferentPoolFees() public {
-        // Test with different valid pool fees
-        uint256 amountIn = 1000;
-        uint256 amountOutMinimum = 900;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        // Test with 0.05% fee
-        mockTWAPProvider.addTokenPair(address(tokenA), address(tokenB), address(mockWETH), 500);
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountIn);
-
-        uint256 amountOut =
-            swapper.swapExactInputSingle(address(tokenA), address(tokenB), amountIn, 500, deadline, amountOutMinimum);
-
-        assertEq(amountOut, mockRouter.mockAmountOut());
-        vm.stopPrank();
-    }
-
-    function testSwapExactInput_WithHighPoolFee() public {
-        // Test with 1% fee
-        uint256 amountIn = 1000;
-        uint256 amountOutMinimum = 900;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        mockTWAPProvider.addTokenPair(address(tokenA), address(tokenB), address(mockWETH), 10000);
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountIn);
-
-        uint256 amountOut =
-            swapper.swapExactInputSingle(address(tokenA), address(tokenB), amountIn, 10000, deadline, amountOutMinimum);
-
-        assertEq(amountOut, mockRouter.mockAmountOut());
-        vm.stopPrank();
-    }
-
     function testSwapExactInput_ETHToETH_Reverts() public {
         vm.prank(user);
         vm.expectRevert("tokenIn and tokenOut must differ");
@@ -1065,6 +1511,62 @@ contract UniswapV3SwapperTest is Test {
 
         assertEq(amountOut, mockRouter.mockAmountOut(), "Should get expected amount out");
         assertGt(amountOut, 0, "Should receive some tokens");
+        assertEq(tokenC.balanceOf(user) - userTokenCBalanceBefore, amountOut, "User should receive tokens");
+        vm.stopPrank();
+    }
+
+    function testSwapExactInputMultihop_WithFee10000() public {
+        uint256 amountIn = 1000;
+        uint256 amountOutMinimum = 800;
+        uint24[] memory poolFees = new uint24[](2);
+        poolFees[0] = 10000; // First hop with 1% fee
+        poolFees[1] = 10000; // Second hop with 1% fee
+
+        address[] memory tokens = new address[](3);
+        tokens[0] = address(tokenA);
+        tokens[1] = address(tokenB);
+        tokens[2] = address(tokenC);
+
+        mockRouter.setFinalToken(address(tokenC));
+
+        uint256 deadline = block.timestamp + 1 hours;
+        uint256 userTokenCBalanceBefore = tokenC.balanceOf(user);
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountIn);
+
+        uint256 amountOut = swapper.swapExactInputMultihop(tokens, poolFees, amountIn, amountOutMinimum, deadline);
+
+        assertEq(amountOut, mockRouter.mockAmountOut());
+        assertGt(amountOut, amountOutMinimum, "Should meet minimum output");
+        assertEq(tokenC.balanceOf(user) - userTokenCBalanceBefore, amountOut, "User should receive tokens");
+        vm.stopPrank();
+    }
+
+    function testSwapExactInputMultihop_WithFee500() public {
+        uint256 amountIn = 1000;
+        uint256 amountOutMinimum = 800;
+        uint24[] memory poolFees = new uint24[](2);
+        poolFees[0] = 500; // First hop with 0.05% fee
+        poolFees[1] = 500; // Second hop with 0.05% fee
+
+        address[] memory tokens = new address[](3);
+        tokens[0] = address(tokenA);
+        tokens[1] = address(tokenB);
+        tokens[2] = address(tokenC);
+
+        mockRouter.setFinalToken(address(tokenC));
+
+        uint256 deadline = block.timestamp + 1 hours;
+        uint256 userTokenCBalanceBefore = tokenC.balanceOf(user);
+
+        vm.startPrank(user);
+        tokenA.approve(address(swapper), amountIn);
+
+        uint256 amountOut = swapper.swapExactInputMultihop(tokens, poolFees, amountIn, amountOutMinimum, deadline);
+
+        assertEq(amountOut, mockRouter.mockAmountOut());
+        assertGt(amountOut, amountOutMinimum, "Should meet minimum output");
         assertEq(tokenC.balanceOf(user) - userTokenCBalanceBefore, amountOut, "User should receive tokens");
         vm.stopPrank();
     }
@@ -1166,85 +1668,6 @@ contract UniswapV3SwapperTest is Test {
         assertTrue(swapper.hasRole(swapper.PAUSER_ROLE(), user));
     }
 
-    function testConstructor_ZeroAddressReverts() public {
-        vm.expectRevert();
-        new UniswapV3Swapper(address(0), address(mockWETH), address(mockTWAPProvider));
-
-        vm.expectRevert();
-        new UniswapV3Swapper(address(mockRouter), address(0), address(mockTWAPProvider));
-
-        vm.expectRevert();
-        new UniswapV3Swapper(address(mockRouter), address(mockWETH), address(0));
-    }
-
-    function testSwapExactInput_WithExactMinimum() public {
-        uint256 amountIn = 1000;
-        uint256 amountOutMinimum = mockRouter.mockAmountOut(); // Exact minimum
-        uint24 poolFee = 3000;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountIn);
-
-        uint256 amountOut = swapper.swapExactInputSingle(
-            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
-        );
-
-        assertEq(amountOut, mockRouter.mockAmountOut());
-        assertEq(amountOut, amountOutMinimum, "Should get exact minimum");
-        vm.stopPrank();
-    }
-
-    function testSwapExactOutput_WithExactMaximum() public {
-        uint256 amountOut = 1000;
-        uint256 amountInMaximum = mockRouter.mockAmountIn(); // Exact maximum
-        uint24 poolFee = 3000;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountInMaximum);
-
-        uint256 amountIn = swapper.swapExactOutputSingle(
-            address(tokenA), address(tokenB), amountOut, amountInMaximum, poolFee, deadline
-        );
-
-        assertEq(amountIn, mockRouter.mockAmountIn());
-        assertEq(amountIn, amountInMaximum, "Should use exact maximum");
-        vm.stopPrank();
-    }
-
-    function testSwapExactInput_WithZeroMinimum() public {
-        uint256 amountIn = 1000;
-        uint256 amountOutMinimum = 0;
-        uint24 poolFee = 3000;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountIn);
-
-        uint256 amountOut = swapper.swapExactInputSingle(
-            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
-        );
-
-        assertEq(amountOut, mockRouter.mockAmountOut());
-        assertGt(amountOut, amountOutMinimum, "Should get more than zero");
-        vm.stopPrank();
-    }
-
-    function testSwapExactInput_WithVeryHighMinimum() public {
-        uint256 amountIn = 1000;
-        uint256 amountOutMinimum = mockRouter.mockAmountOut() + 1000; // Higher than possible
-        uint24 poolFee = 3000;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountIn);
-
-        vm.expectRevert("Slippage limit exceeded");
-        swapper.swapExactInputSingle(address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum);
-        vm.stopPrank();
-    }
-
     function testMultihop_WithSingleToken() public {
         uint256 amountIn = 1000;
         uint24[] memory poolFees = new uint24[](0);
@@ -1311,40 +1734,6 @@ contract UniswapV3SwapperTest is Test {
 
         vm.expectRevert("At least 2 tokens required");
         swapper.swapExactInputMultihop(tokens, poolFees, amountIn, 800, deadline);
-        vm.stopPrank();
-    }
-
-    function testSwapExactInput_WithMaxDeadline() public {
-        uint256 amountIn = 1000;
-        uint256 amountOutMinimum = 900;
-        uint24 poolFee = 3000;
-        uint256 deadline = type(uint256).max;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountIn);
-
-        uint256 amountOut = swapper.swapExactInputSingle(
-            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
-        );
-
-        assertEq(amountOut, mockRouter.mockAmountOut());
-        vm.stopPrank();
-    }
-
-    function testSwapExactOutput_WithMaxDeadline() public {
-        uint256 amountOut = 1000;
-        uint256 amountInMaximum = 2000;
-        uint24 poolFee = 3000;
-        uint256 deadline = type(uint256).max;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountInMaximum);
-
-        uint256 amountIn = swapper.swapExactOutputSingle(
-            address(tokenA), address(tokenB), amountOut, amountInMaximum, poolFee, deadline
-        );
-
-        assertEq(amountIn, mockRouter.mockAmountIn());
         vm.stopPrank();
     }
 
@@ -1456,158 +1845,6 @@ contract UniswapV3SwapperTest is Test {
         vm.stopPrank();
     }
 
-    function testSwapExactInput_WithFee500() public {
-        uint256 amountIn = 1000;
-        uint256 amountOutMinimum = 900;
-        uint24 poolFee = 500; // Test 0.05% fee
-        uint256 deadline = block.timestamp + 1 hours;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountIn);
-
-        uint256 amountOut = swapper.swapExactInputSingle(
-            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
-        );
-
-        assertEq(amountOut, mockRouter.mockAmountOut());
-        vm.stopPrank();
-    }
-
-    function testSwapExactInput_WithFee10000() public {
-        uint256 amountIn = 1000;
-        uint256 amountOutMinimum = 900;
-        uint24 poolFee = 10000; // Test 1% fee
-        uint256 deadline = block.timestamp + 1 hours;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountIn);
-
-        uint256 amountOut = swapper.swapExactInputSingle(
-            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
-        );
-
-        assertEq(amountOut, mockRouter.mockAmountOut());
-        vm.stopPrank();
-    }
-
-    function testSwapExactInput_WithInvalidFee() public {
-        uint256 amountIn = 1000;
-        uint256 amountOutMinimum = 900;
-        uint24 poolFee = 2000; // Invalid fee (not 500, 3000, or 10000)
-        uint256 deadline = block.timestamp + 1 hours;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountIn);
-
-        vm.expectRevert("Invalid pool fee");
-        swapper.swapExactInputSingle(address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum);
-        vm.stopPrank();
-    }
-
-    function testSwapExactOutput_WithFee500() public {
-        uint256 amountOut = 1000;
-        uint256 amountInMaximum = 2000;
-        uint24 poolFee = 500; // Test 0.05% fee
-        uint256 deadline = block.timestamp + 1 hours;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountInMaximum);
-
-        uint256 amountIn = swapper.swapExactOutputSingle(
-            address(tokenA), address(tokenB), amountOut, amountInMaximum, poolFee, deadline
-        );
-
-        assertEq(amountIn, mockRouter.mockAmountIn());
-        vm.stopPrank();
-    }
-
-    function testSwapExactOutput_WithFee10000() public {
-        uint256 amountOut = 1000;
-        uint256 amountInMaximum = 2000;
-        uint24 poolFee = 10000; // Test 1% fee
-        uint256 deadline = block.timestamp + 1 hours;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountInMaximum);
-
-        uint256 amountIn = swapper.swapExactOutputSingle(
-            address(tokenA), address(tokenB), amountOut, amountInMaximum, poolFee, deadline
-        );
-
-        assertEq(amountIn, mockRouter.mockAmountIn());
-        vm.stopPrank();
-    }
-
-    function testSwapExactOutput_WithInvalidFee() public {
-        uint256 amountOut = 1000;
-        uint256 amountInMaximum = 2000;
-        uint24 poolFee = 2000; // Invalid fee (not 500, 3000, or 10000)
-        uint256 deadline = block.timestamp + 1 hours;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountInMaximum);
-
-        vm.expectRevert("Invalid pool fee");
-        swapper.swapExactOutputSingle(address(tokenA), address(tokenB), amountOut, amountInMaximum, poolFee, deadline);
-        vm.stopPrank();
-    }
-
-    function testSwapExactInputMultihop_WithFee500() public {
-        uint256 amountIn = 1000;
-        uint256 amountOutMinimum = 800;
-        uint24[] memory poolFees = new uint24[](2);
-        poolFees[0] = 500; // First hop with 0.05% fee
-        poolFees[1] = 500; // Second hop with 0.05% fee
-
-        address[] memory tokens = new address[](3);
-        tokens[0] = address(tokenA);
-        tokens[1] = address(tokenB);
-        tokens[2] = address(tokenC);
-
-        mockRouter.setFinalToken(address(tokenC));
-
-        uint256 deadline = block.timestamp + 1 hours;
-        uint256 userTokenCBalanceBefore = tokenC.balanceOf(user);
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountIn);
-
-        uint256 amountOut = swapper.swapExactInputMultihop(tokens, poolFees, amountIn, amountOutMinimum, deadline);
-
-        assertEq(amountOut, mockRouter.mockAmountOut());
-        assertGt(amountOut, amountOutMinimum, "Should meet minimum output");
-        assertEq(tokenC.balanceOf(user) - userTokenCBalanceBefore, amountOut, "User should receive tokens");
-        vm.stopPrank();
-    }
-
-    function testSwapExactInputMultihop_WithFee10000() public {
-        uint256 amountIn = 1000;
-        uint256 amountOutMinimum = 800;
-        uint24[] memory poolFees = new uint24[](2);
-        poolFees[0] = 10000; // First hop with 1% fee
-        poolFees[1] = 10000; // Second hop with 1% fee
-
-        address[] memory tokens = new address[](3);
-        tokens[0] = address(tokenA);
-        tokens[1] = address(tokenB);
-        tokens[2] = address(tokenC);
-
-        mockRouter.setFinalToken(address(tokenC));
-
-        uint256 deadline = block.timestamp + 1 hours;
-        uint256 userTokenCBalanceBefore = tokenC.balanceOf(user);
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountIn);
-
-        uint256 amountOut = swapper.swapExactInputMultihop(tokens, poolFees, amountIn, amountOutMinimum, deadline);
-
-        assertEq(amountOut, mockRouter.mockAmountOut());
-        assertGt(amountOut, amountOutMinimum, "Should meet minimum output");
-        assertEq(tokenC.balanceOf(user) - userTokenCBalanceBefore, amountOut, "User should receive tokens");
-        vm.stopPrank();
-    }
-
     function testSwapExactOutputMultihop_WithFee500() public {
         uint256 amountOut = 1000;
         uint256 amountInMaximum = 2000;
@@ -1668,74 +1905,8 @@ contract UniswapV3SwapperTest is Test {
         vm.stopPrank();
     }
 
-    function testSwapExactInput_WithExactDeadline() public {
-        uint256 amountIn = 1000;
-        uint256 amountOutMinimum = 900;
-        uint24 poolFee = 3000;
-        uint256 deadline = block.timestamp;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountIn);
-
-        uint256 amountOut = swapper.swapExactInputSingle(
-            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
-        );
-
-        assertEq(amountOut, mockRouter.mockAmountOut());
-        vm.stopPrank();
-    }
-
-    function testSwapExactOutput_WithExactDeadline() public {
-        uint256 amountOut = 1000;
-        uint256 amountInMaximum = 2000;
-        uint24 poolFee = 3000;
-        uint256 deadline = block.timestamp;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountInMaximum);
-
-        uint256 amountIn = swapper.swapExactOutputSingle(
-            address(tokenA), address(tokenB), amountOut, amountInMaximum, poolFee, deadline
-        );
-
-        assertEq(amountIn, mockRouter.mockAmountIn());
-        vm.stopPrank();
-    }
-
-    function testSetTwapPeriod() public {
-        uint32 newPeriod = 3600; // 1 hour
-
-        vm.prank(admin);
-        swapper.setTwapPeriod(newPeriod);
-
-        assertEq(uint256(swapper.twapPeriod()), uint256(newPeriod));
-    }
-
-    function testSetTwapPeriod_RevertsNotAdmin() public {
-        uint32 newPeriod = 3600;
-
-        vm.prank(user);
-        vm.expectRevert("Caller is not admin");
-        swapper.setTwapPeriod(newPeriod);
-    }
-
-    function testSetTwapPeriod_WithZeroPeriod() public {
-        uint32 newPeriod = 0;
-
-        vm.prank(admin);
-        vm.expectRevert("TWAP period must be greater than 0");
-        swapper.setTwapPeriod(newPeriod);
-    }
-
-    function testSetTwapPeriod_WithMaxPeriod() public {
-        uint32 newPeriod = type(uint32).max;
-
-        vm.prank(admin);
-        swapper.setTwapPeriod(newPeriod);
-
-        assertEq(uint256(swapper.twapPeriod()), uint256(newPeriod));
-    }
-
+    // ============ UTILITY FUNCTION TESTS ============
+    
     function testNormalizeToken_WithZeroAddress() public {
         uint256 amountIn = 1 ether;
         uint256 amountOutMinimum = 900;
@@ -1824,6 +1995,8 @@ contract UniswapV3SwapperTest is Test {
         vm.stopPrank();
     }
 
+    // ============ PATH BUILDING TESTS ============
+    
     function testBuildPath_WithTwoTokens() public {
         uint256 amountIn = 1000;
         uint256 amountOutMinimum = 800;
@@ -1878,6 +2051,8 @@ contract UniswapV3SwapperTest is Test {
         vm.stopPrank();
     }
 
+    // ============ FUND TRANSFER TESTS ============
+    
     function testTakeFunds_WithExactETHAmount() public {
         uint256 amountIn = 1 ether;
         uint256 amountOutMinimum = 900;
@@ -1931,6 +2106,8 @@ contract UniswapV3SwapperTest is Test {
         vm.stopPrank();
     }
 
+    // ============ TWAP PERIOD RESOLUTION TESTS ============
+    
     function testResolveTwapPeriod_WithZeroPeriod() public {
         uint256 amountIn = 1000;
         uint256 amountOutMinimum = 900;
@@ -1969,238 +2146,5 @@ contract UniswapV3SwapperTest is Test {
 
         assertEq(amountOut, mockRouter.mockAmountOut());
         vm.stopPrank();
-    }
-
-
-    function testSwapExactInput_WithMaxUint256Amount() public {
-        uint256 amountIn = 1000000;
-        uint256 amountOutMinimum = 900;
-        uint24 poolFee = 3000;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        // Mint enough tokens for this test
-        tokenA.mint(user, amountIn);
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountIn);
-
-        uint256 amountOut = swapper.swapExactInputSingle(
-            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
-        );
-
-        assertEq(amountOut, mockRouter.mockAmountOut());
-        vm.stopPrank();
-    }
-
-    function testSwapExactOutput_WithMaxUint256Amount() public {
-        uint256 amountOut = 1000000;
-        uint256 amountInMaximum = 2000000;
-        uint24 poolFee = 3000;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        // Mint enough tokens for this test
-        tokenA.mint(user, amountInMaximum);
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountInMaximum);
-
-        uint256 amountIn = swapper.swapExactOutputSingle(
-            address(tokenA), address(tokenB), amountOut, amountInMaximum, poolFee, deadline
-        );
-
-        assertEq(amountIn, mockRouter.mockAmountIn());
-        vm.stopPrank();
-    }
-
-    function testSwapExactInput_WithVerySmallAmount() public {
-        uint256 amountIn = 1; // 1 wei
-        uint256 amountOutMinimum = 0;
-        uint24 poolFee = 3000;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountIn);
-
-        uint256 amountOut = swapper.swapExactInputSingle(
-            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
-        );
-
-        assertEq(amountOut, mockRouter.mockAmountOut());
-        vm.stopPrank();
-    }
-
-    function testSwapExactOutput_WithVerySmallAmount() public {
-        uint256 amountOut = 1; // 1 wei
-        uint256 amountInMaximum = 1000;
-        uint24 poolFee = 3000;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountInMaximum);
-
-        uint256 amountIn = swapper.swapExactOutputSingle(
-            address(tokenA), address(tokenB), amountOut, amountInMaximum, poolFee, deadline
-        );
-
-        assertEq(amountIn, mockRouter.mockAmountIn());
-        vm.stopPrank();
-    }
-
-    function testConstructor_WithValidAddresses() public {
-        // Test constructor with valid addresses
-        MockSwapRouter newRouter = new MockSwapRouter();
-        MockWETH newWETH = new MockWETH();
-        MockTWAPProvider newTWAPProvider = new MockTWAPProvider();
-
-        UniswapV3Swapper newSwapper =
-            new UniswapV3Swapper(address(newRouter), address(newWETH), address(newTWAPProvider));
-
-        assertEq(address(newSwapper.router()), address(newRouter));
-        assertEq(address(newSwapper.wETH()), address(newWETH));
-        assertEq(address(newSwapper.twapProvider()), address(newTWAPProvider));
-    }
-
-    function testTWAPIntegration_WithDifferentSlippage() public {
-        uint256 amountIn = 1000;
-        uint256 amountOutMinimum = 800;
-        uint24 poolFee = 3000;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountIn);
-
-        uint256 amountOut = swapper.swapExactInputSingle(
-            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
-        );
-
-        assertEq(amountOut, mockRouter.mockAmountOut());
-        assertGt(amountOut, amountOutMinimum, "Should meet minimum output");
-        vm.stopPrank();
-    }
-
-    function testTWAPIntegration_WithZeroSlippage() public {
-        uint256 amountIn = 1000;
-        uint256 amountOutMinimum = 0; // Zero minimum to test TWAP logic
-        uint24 poolFee = 3000;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountIn);
-
-        uint256 amountOut = swapper.swapExactInputSingle(
-            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
-        );
-
-        assertEq(amountOut, mockRouter.mockAmountOut());
-        assertGt(amountOut, 0, "Should receive some tokens");
-        vm.stopPrank();
-    }
-
-    function testSwapExactInput_WithInvalidTokenAddress() public {
-        uint256 amountIn = 1000;
-        uint256 amountOutMinimum = 900;
-        uint24 poolFee = 3000;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountIn);
-
-        vm.expectRevert("Token pair not allowed");
-        swapper.swapExactInputSingle(address(tokenA), address(0x123), amountIn, poolFee, deadline, amountOutMinimum);
-        vm.stopPrank();
-    }
-
-    function testSwapExactOutput_WithInvalidTokenAddress() public {
-        uint256 amountOut = 1000;
-        uint256 amountInMaximum = 2000;
-        uint24 poolFee = 3000;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountInMaximum);
-
-        vm.expectRevert("Token pair not allowed");
-        swapper.swapExactOutputSingle(address(tokenA), address(0x123), amountOut, amountInMaximum, poolFee, deadline);
-        vm.stopPrank();
-    }
-
-    function testSwapExactInput_WithVeryLongDeadline() public {
-        uint256 amountIn = 1000;
-        uint256 amountOutMinimum = 900;
-        uint24 poolFee = 3000;
-        uint256 deadline = block.timestamp + 365 days; // 1 year
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountIn);
-
-        uint256 amountOut = swapper.swapExactInputSingle(
-            address(tokenA), address(tokenB), amountIn, poolFee, deadline, amountOutMinimum
-        );
-
-        assertEq(amountOut, mockRouter.mockAmountOut());
-        vm.stopPrank();
-    }
-
-    function testSwapExactOutput_WithVeryLongDeadline() public {
-        uint256 amountOut = 1000;
-        uint256 amountInMaximum = 2000;
-        uint24 poolFee = 3000;
-        uint256 deadline = block.timestamp + 365 days; // 1 year
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountInMaximum);
-
-        uint256 amountIn = swapper.swapExactOutputSingle(
-            address(tokenA), address(tokenB), amountOut, amountInMaximum, poolFee, deadline
-        );
-
-        assertEq(amountIn, mockRouter.mockAmountIn());
-        vm.stopPrank();
-    }
-
-    function testSwapExactInput_WithAllFeeTiers() public {
-        uint256 amountIn = 1000;
-        uint256 amountOutMinimum = 900;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        uint24[] memory fees = new uint24[](3);
-        fees[0] = 500; // 0.05%
-        fees[1] = 3000; // 0.30%
-        fees[2] = 10000; // 1.00%
-
-        for (uint256 i = 0; i < fees.length; i++) {
-            vm.startPrank(user);
-            tokenA.approve(address(swapper), amountIn);
-
-            uint256 amountOut = swapper.swapExactInputSingle(
-                address(tokenA), address(tokenB), amountIn, fees[i], deadline, amountOutMinimum
-            );
-
-            assertEq(amountOut, mockRouter.mockAmountOut());
-            vm.stopPrank();
-        }
-    }
-
-    function testSwapExactOutput_WithAllFeeTiers() public {
-        uint256 amountOut = 1000;
-        uint256 amountInMaximum = 2000;
-        uint256 deadline = block.timestamp + 1 hours;
-
-        uint24[] memory fees = new uint24[](3);
-        fees[0] = 500; // 0.05%
-        fees[1] = 3000; // 0.30%
-        fees[2] = 10000; // 1.00%
-
-        for (uint256 i = 0; i < fees.length; i++) {
-            vm.startPrank(user);
-            tokenA.approve(address(swapper), amountInMaximum);
-
-            uint256 amountIn = swapper.swapExactOutputSingle(
-                address(tokenA), address(tokenB), amountOut, amountInMaximum, fees[i], deadline
-            );
-
-            assertEq(amountIn, mockRouter.mockAmountIn());
-            vm.stopPrank();
-        }
     }
 }

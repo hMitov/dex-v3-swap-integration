@@ -12,15 +12,16 @@ import "v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 /// @title UniswapV3Swapper Integration Tests
 /// @notice Integration tests for UniswapV3Swapper contract using mainnet fork
 contract UniswapV3SwapperITTest is Test {
+    // ============ CONTRACT INSTANCES ============
     UniswapV3Swapper private swapper;
     TWAPPriceProvider private twapProvider;
     IUniswapV3Factory private factory;
 
-    // Test accounts
+    // ============ TEST ACCOUNTS ============
     address private user;
     address private admin;
 
-    // Mainnet addresses
+    // ============ MAINNET ADDRESSES ============
     address private constant MAINNET_ROUTER = 0xE592427A0AEce92De3Edee1F18E0157C05861564;
     address private constant MAINNET_WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     address private constant MAINNET_USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
@@ -77,6 +78,8 @@ contract UniswapV3SwapperITTest is Test {
         vm.stopPrank();
     }
 
+    // ============ SETUP & CONFIGURATION TESTS ============
+    
     function testSetup() public view {
         assertEq(address(swapper) != address(0), true, "Integration contract should be deployed");
         assertEq(user.balance, 100 ether, "User should have 100 ETH");
@@ -85,6 +88,8 @@ contract UniswapV3SwapperITTest is Test {
         assertEq(address(usdc), MAINNET_USDC, "USDC should be initialized");
     }
 
+    // ============ EXACT INPUT SINGLE-HOP INTEGRATION TESTS ============
+    
     function testSwapExactInput_WETHToUSDC_IT_SUCCESS() public {
         uint256 amountIn = 0.01 ether;
         uint256 amountOutMinimum = 0;
@@ -187,6 +192,41 @@ contract UniswapV3SwapperITTest is Test {
         console.log("User ETH balance after:", user.balance);
     }
 
+    // ============ EXACT OUTPUT SINGLE-HOP INTEGRATION TESTS ============
+    
+    function testSwapExactOutputSingle_WETHToUSDC_IT_SUCCESS() public {
+        uint256 amountOut = 50 * 10 ** 6;
+        uint256 amountInMaximum = 0.05 ether;
+        uint256 deadline = block.timestamp + 1 hours;
+        uint256 userUSDCBalanceBefore = usdc.balanceOf(user);
+        uint256 userETHBalanceBefore = user.balance;
+
+        vm.startPrank(user);
+
+        uint256 amountIn = swapper.swapExactOutputSingle{value: amountInMaximum}(
+            address(0), // WETH
+            address(usdc),
+            amountOut,
+            amountInMaximum,
+            poolFee,
+            deadline
+        );
+
+        vm.stopPrank();
+
+        assertLe(amountIn, amountInMaximum, "Amount in should not exceed maximum");
+        assertGt(amountIn, 0, "Should have spent some ETH");
+        assertEq(usdc.balanceOf(user) - userUSDCBalanceBefore, amountOut, "Should receive exact USDC amount");
+        assertLt(user.balance, userETHBalanceBefore, "User should have spent ETH");
+
+        console.log("SUCCESS: WETH to USDC exact output single hop");
+        console.log("Amount out (USDC):", amountOut);
+        console.log("Amount in (WETH):", amountIn);
+        console.log("Amount in maximum (WETH):", amountInMaximum);
+        console.log("User USDC balance after:", usdc.balanceOf(user));
+        console.log("User ETH balance after:", user.balance);
+    }
+
     function testSwapExactOutput_WETHToUSDC_IT_SUCCESS() public {
         uint256 amountOut = 100 * 10 ** 6;
         uint256 amountInMaximum = 0.1 ether;
@@ -255,6 +295,8 @@ contract UniswapV3SwapperITTest is Test {
         console.log("User USDC balance after:", usdc.balanceOf(user));
     }
 
+    // ============ EXACT INPUT MULTIHOP INTEGRATION TESTS ============
+    
     function testSwapExactInputMultihop_WETHToUSDCToUSDT_IT_SUCCESS() public {
         uint256 amountIn = 0.1 ether;
         uint256 amountOutMinimum = 100; // Minimum 100 USDT
@@ -308,6 +350,8 @@ contract UniswapV3SwapperITTest is Test {
         vm.stopPrank();
     }
 
+    // ============ REVERT & ERROR TESTS ============
+    
     function testSwapExactInputMultihop_RevertsPairNotAllowed() public {
         uint256 amountIn = 0.1 ether;
         uint24[] memory poolFees = new uint24[](2);
@@ -388,7 +432,7 @@ contract UniswapV3SwapperITTest is Test {
     }
 
     // // ============ Exact Output Multihop Success Tests ============
-
+    
     function testSwapExactOutputMultihop_WETHToUSDCToUSDT_IT_SUCCESS() public {
         uint256 amountOut = 50 * 10 ** 6;
         uint256 amountInMaximum = 0.1 ether;
@@ -689,6 +733,8 @@ contract UniswapV3SwapperITTest is Test {
         vm.stopPrank();
     }
 
+    // ============ UTILITY & HELPER FUNCTIONS ============
+    
     function _swapWETHForUSDT(uint256 ethAmount) internal returns (uint256) {
         uint256 amountOutMinimum = 0;
         uint256 deadline = block.timestamp + 1 hours;
@@ -702,39 +748,6 @@ contract UniswapV3SwapperITTest is Test {
         vm.stopPrank();
 
         return amountOut;
-    }
-
-    function testSwapExactOutputSingle_WETHToUSDC_IT_SUCCESS() public {
-        uint256 amountOut = 50 * 10 ** 6;
-        uint256 amountInMaximum = 0.05 ether;
-        uint256 deadline = block.timestamp + 1 hours;
-        uint256 userUSDCBalanceBefore = usdc.balanceOf(user);
-        uint256 userETHBalanceBefore = user.balance;
-
-        vm.startPrank(user);
-
-        uint256 amountIn = swapper.swapExactOutputSingle{value: amountInMaximum}(
-            address(0), // WETH
-            address(usdc),
-            amountOut,
-            amountInMaximum,
-            poolFee,
-            deadline
-        );
-
-        vm.stopPrank();
-
-        assertLe(amountIn, amountInMaximum, "Amount in should not exceed maximum");
-        assertGt(amountIn, 0, "Should have spent some ETH");
-        assertEq(usdc.balanceOf(user) - userUSDCBalanceBefore, amountOut, "Should receive exact USDC amount");
-        assertLt(user.balance, userETHBalanceBefore, "User should have spent ETH");
-
-        console.log("SUCCESS: WETH to USDC exact output single hop");
-        console.log("Amount out (USDC):", amountOut);
-        console.log("Amount in (WETH):", amountIn);
-        console.log("Amount in maximum (WETH):", amountInMaximum);
-        console.log("User USDC balance after:", usdc.balanceOf(user));
-        console.log("User ETH balance after:", user.balance);
     }
 
     function _addTokenPairWithCorrectOrder(address tokenA, address tokenB, uint24 fee) internal {

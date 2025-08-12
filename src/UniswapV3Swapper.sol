@@ -7,8 +7,6 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import "@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol";
-import "@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3SwapCallback.sol";
-import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import "./interfaces/IUniswapV3Swapper.sol";
 import "./interfaces/IWETH.sol";
 import "./interfaces/ITWAPPriceProvider.sol";
@@ -28,6 +26,7 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
 
     uint32 public twapPeriod = 0;
     uint256 public twapSlippageBps = 100; // 1.00% buffer;
+    uint256 public constant MAX_TWAP_PERIOD = 86400; // 24 hours
 
     /**
      * @notice Constructor to initialize the swapper contract
@@ -99,7 +98,7 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
      * @param _twapPeriod The TWAP period in seconds
      */
     function setTwapPeriod(uint32 _twapPeriod) external override onlyAdmin {
-        require(_twapPeriod > 0, "TWAP period must be greater than 0");
+        require(_twapPeriod <= MAX_TWAP_PERIOD, "TWAP period must be less than or equal to 24 hours");
         twapPeriod = _twapPeriod;
     }
 
@@ -132,7 +131,7 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
     ) external payable override nonReentrant whenNotPaused returns (uint256 amountOut) {
         require(tokenIn != tokenOut, "tokenIn and tokenOut must differ");
         require(amountIn > 0, "amountIn must be greater than zero");
-        require(poolFee == 500 || poolFee == 3000 || poolFee == 10000, "Invalid pool fee");
+        _verifyPoolFee(poolFee);
         require(deadline >= block.timestamp, "Deadline passed");
 
         bool isNativeIn = (tokenIn == address(0));
@@ -191,7 +190,7 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
         require(tokenIn != tokenOut, "tokenIn and tokenOut must differ");
         require(deadline >= block.timestamp, "Deadline passed");
         require(amountOut > 0, "amountOut must be greater than zero");
-        require(poolFee == 500 || poolFee == 3000 || poolFee == 10000, "Invalid pool fee");
+        _verifyPoolFee(poolFee);
 
         bool isNativeIn = (tokenIn == address(0));
         bool isNativeOut = (tokenOut == address(0));
@@ -573,6 +572,10 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
         (uint256 twapIn,) =
             twapProvider.getTwapPrice(tokenOut, tokenIn, uint128(amountOut), poolFee, _resolveTwapPeriod());
         maxIn = (twapIn * (10_000 + twapSlippageBps)) / 10_000;
+    }
+
+    function _verifyPoolFee(uint24 poolFee) internal view {
+        require(poolFee == 100 || poolFee == 500 || poolFee == 3000 || poolFee == 10000, "Invalid pool fee");
     }
 
     // Function to receive ETH when WETH is withdrawn
