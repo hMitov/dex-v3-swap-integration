@@ -1,14 +1,29 @@
-# Compiler files
+# Foundry build files
 cache/
 out/
 
-# Ignores development broadcast logs
-!/broadcast
-/broadcast/*/31337/
+# Foundry deployment logs
+/broadcast/
+!/broadcast/DeployDexPool.s.sol/
+!/broadcast/DeployToken.s.sol/
+/broadcast/**/31337/
 /broadcast/**/dry-run/
+**/run-latest.json
+
+# Node.js dependencies
+node_modules/
+
+# Environment variables
+.env
+.env.*
+
+# IDE and system files
+.idea/
+.vscode/
+.DS_Store
+
+# Logs
+*.log
 
 # Docs
 docs/
-
-# Dotenv file
-.env
