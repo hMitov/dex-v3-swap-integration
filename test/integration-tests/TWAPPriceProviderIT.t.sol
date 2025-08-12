@@ -15,30 +15,30 @@ import "@uniswap/v3-core/contracts/libraries/FullMath.sol";
 /// @title TWAPPriceProvider Integration Tests
 /// @notice Integration tests for TWAPPriceProvider using mainnet fork
 contract TWAPPriceProviderITTest is Test {
-    ITWAPPriceProvider public priceProvider;
+    ITWAPPriceProvider private priceProvider;
 
     // Test accounts
-    address public user;
-    address public admin;
+    address private user;
+    address private admin;
 
     // Mainnet addresses
-    address public constant MAINNET_WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-    address public constant MAINNET_USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
-    address public constant MAINNET_USDT = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
+    address private constant MAINNET_WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    address private constant MAINNET_USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+    address private constant MAINNET_USDT = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
 
     // Uniswap V3 Pool addresses (mainnet)
-    address public constant WETH_USDC_POOL = 0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8; // 0.3% fee
-    address public constant WETH_USDT_POOL = 0x4e68Ccd3E89f51C3074ca5072bbAC773960dFa36; // 0.3% fee
-    address public constant USDC_USDT_POOL = 0x3416cF6C708Da44DB2624D63ea0AAef7113527C6; // 0.01% fee
+    address private constant WETH_USDC_POOL = 0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8; // 0.3% fee
+    address private constant WETH_USDT_POOL = 0x4e68Ccd3E89f51C3074ca5072bbAC773960dFa36; // 0.3% fee
+    address private constant USDC_USDT_POOL = 0x3416cF6C708Da44DB2624D63ea0AAef7113527C6; // 0.01% fee
 
     // Token interfaces
-    IERC20 public weth;
-    IERC20 public usdc;
-    IERC20 public usdt;
-    IERC20 public dai;
+    IERC20 private weth;
+    IERC20 private usdc;
+    IERC20 private usdt;
+    IERC20 private dai;
 
     // Fork ID
-    uint256 public mainnetFork;
+    uint256 private mainnetFork;
 
     function setUp() public {
         // Create fork
@@ -72,7 +72,7 @@ contract TWAPPriceProviderITTest is Test {
         assertEq(address(usdc), MAINNET_USDC, "USDC should be initialized");
     }
 
-    function testVerifyPoolAddresses() public {
+    function testVerifyPoolAddresses() public view {
         // Uniswap V3 Factory address on mainnet
         address factory = 0x1F98431c8aD98523631AE4a59f267346ea31F984;
 
@@ -96,7 +96,7 @@ contract TWAPPriceProviderITTest is Test {
         assertEq(uint256(pool3.fee()), 100, "USDC-USDT pool should have 0.01% fee");
     }
 
-    function testCheckPoolLiquidity() public {
+    function testCheckPoolLiquidity() public view {
         // Check the actual liquidity of the pools
         IUniswapV3Pool wethUsdcPool = IUniswapV3Pool(WETH_USDC_POOL);
         IUniswapV3Pool wethUsdtPool = IUniswapV3Pool(WETH_USDT_POOL);

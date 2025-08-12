@@ -25,6 +25,9 @@ interface IUniswapV3Swapper {
     /// @notice Unpauses swap operations
     function unpause() external;
 
+    /// @notice Sets the TWAP period
+    function setTwapPeriod(uint32 twapPeriod) external;
+
     /// @notice Swaps an exact amount of input token for a minimum amount of output token in a single pool
     /// @return amountOut The amount of output token received
     function swapExactInputSingle(
@@ -47,23 +50,23 @@ interface IUniswapV3Swapper {
         uint256 deadline
     ) external payable returns (uint256 amountIn);
 
-    // /// @notice Swaps an exact amount of input token for a minimum amount of output token through multiple pools
-    // /// @return amountOut The amount of output token received
-    // function swapExactInputMultihop(
-    //     address[] calldata tokens,
-    //     uint24[] calldata poolFees,
-    //     uint256 amountIn,
-    //     uint256 amountOutMinimum,
-    //     uint256 deadline
-    // ) external payable returns (uint256 amountOut);
+    /// @notice Swaps an exact amount of input token for a minimum amount of output token through multiple pools
+    /// @return amountOut The amount of output token received
+    function swapExactInputMultihop(
+        address[] calldata tokens,
+        uint24[] calldata poolFees,
+        uint256 amountIn,
+        uint256 amountOutMinimum,
+        uint256 deadline
+    ) external payable returns (uint256 amountOut);
 
-    // /// @notice Swaps a minimum amount of output token for up to a maximum amount of input token through multiple pools
-    // /// @return amountIn The actual amount of input token spent
-    // function swapExactOutputMultihop(
-    //     address[] calldata tokens,
-    //     uint24[] calldata poolFees,
-    //     uint256 amountOut,
-    //     uint256 amountInMaximum,
-    //     uint256 deadline
-    // ) external payable returns (uint256 amountIn);
+    /// @notice Swaps a minimum amount of output token for up to a maximum amount of input token through multiple pools
+    /// @return amountIn The actual amount of input token spent
+    function swapExactOutputMultihop(
+        address[] calldata tokens,
+        uint24[] calldata poolFees,
+        uint256 amountOut,
+        uint256 amountInMaximum,
+        uint256 deadline
+    ) external payable returns (uint256 amountIn);
 }

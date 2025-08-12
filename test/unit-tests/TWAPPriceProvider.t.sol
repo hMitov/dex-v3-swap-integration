@@ -14,23 +14,23 @@ import "v3-core/contracts/interfaces/pool/IUniswapV3PoolState.sol";
 /// @title TWAPPriceProvider Unit Tests
 /// @notice Comprehensive tests for TWAPPriceProvider functionality
 contract TWAPPriceProviderTest is Test {
-    TWAPPriceProvider public priceProvider;
-    MockERC20 public tokenA;
-    MockERC20 public tokenB;
-    MockWETH public weth;
+    TWAPPriceProvider private priceProvider;
+    MockERC20 private tokenA;
+    MockERC20 private tokenB;
+    MockWETH private weth;
 
     // Test addresses
-    address public constant POOL_ADDRESS = address(0x123);
-    address public constant USER = address(0x111);
-    address public constant ADMIN = address(0x222);
+    address private constant POOL_ADDRESS = address(0x123);
+    address private constant USER = address(0x111);
+    address private constant ADMIN = address(0x222);
 
     // Mock pool for testing
-    address public mockPool;
+    address private mockPool;
 
     // Test parameters
-    uint24 public constant FEE_TIER = 3000; // 0.3%
-    uint32 public constant TWAP_PERIOD = 1800; // 30 minutes
-    uint128 public constant AMOUNT_IN = 1 ether;
+    uint24 private constant FEE_TIER = 3000; // 0.3%
+    uint32 private constant TWAP_PERIOD = 1800; // 30 minutes
+    uint128 private constant AMOUNT_IN = 1 ether;
 
     event PairAdded(bytes32 indexed pairId, address token0, address token1, address pool, uint24 fee);
     event PairRemoved(bytes32 indexed pairId);

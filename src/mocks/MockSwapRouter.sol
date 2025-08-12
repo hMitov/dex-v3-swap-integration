@@ -24,12 +24,21 @@ contract MockSwapRouter is ISwapRouter {
         mockAmountOut = _amountOut;
     }
 
+    /// @notice Set the mocked amountIn for exact output swap simulations
+    /// @param _amountIn The fake amountIn value to return
+    function setAmountIn(uint256 _amountIn) external {
+        mockAmountIn = _amountIn;
+    }
+
     /// @notice Set the final token address used for multihop swaps
     /// @param _finalToken Address of token to mint and transfer in multihop
     function setFinalToken(address _finalToken) external {
         finalToken = _finalToken;
     }
 
+    /// @notice Mocked exact input single swap function
+    /// @param params The parameters for the swap
+    /// @return amountOut The amount of output tokens received
     function exactInputSingle(ISwapRouter.ExactInputSingleParams calldata params)
         external
         payable
@@ -41,6 +50,9 @@ contract MockSwapRouter is ISwapRouter {
         return mockAmountOut;
     }
 
+    /// @notice Mocked exact input swap function
+    /// @param params The parameters for the swap
+    /// @return amountOut The amount of output tokens received
     function exactInput(ISwapRouter.ExactInputParams calldata params)
         external
         payable
@@ -53,6 +65,9 @@ contract MockSwapRouter is ISwapRouter {
         return mockAmountOut;
     }
 
+    /// @notice Mocked exact output single swap function
+    /// @param params The parameters for the swap
+    /// @return amountIn The amount of input tokens spent
     function exactOutputSingle(ISwapRouter.ExactOutputSingleParams calldata params)
         external
         payable
@@ -64,6 +79,9 @@ contract MockSwapRouter is ISwapRouter {
         return mockAmountIn;
     }
 
+    /// @notice Mocked exact output swap function
+    /// @param params The parameters for the swap
+    /// @return amountIn The amount of input tokens spent
     function exactOutput(ISwapRouter.ExactOutputParams calldata params)
         external
         payable
@@ -75,6 +93,6 @@ contract MockSwapRouter is ISwapRouter {
         IERC20(tokenToMint).transfer(params.recipient, params.amountOut);
         return mockAmountIn;
     }
-
+    
     function uniswapV3SwapCallback(int256, int256, bytes calldata) external override {}
 }
