@@ -26,7 +26,8 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
 
     uint32 public twapPeriod = 0;
     uint256 public twapSlippageBps = 100; // 1.00% buffer;
-    uint256 public constant MAX_TWAP_PERIOD = 86400; // 24 hours
+    uint256 private constant MAX_TWAP_PERIOD = 86400; // 24 hours
+    uint256 private constant MAX_TWAP_SLIPPAGE_BPS = 10000; // 100.00%
 
     /**
      * @notice Constructor to initialize the swapper contract
@@ -107,7 +108,7 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
      * @param _twapSlippageBps The TWAP slippage buffer in basis points
      */
     function setTwapSlippageBps(uint256 _twapSlippageBps) external override onlyAdmin {
-        require(_twapSlippageBps <= 10000, "TWAP slippage buffer must be less than or equal to 100%");
+        require(_twapSlippageBps <= MAX_TWAP_SLIPPAGE_BPS, "TWAP slippage buffer must be less than or equal to 100%");
         twapSlippageBps = _twapSlippageBps;
     }
 
@@ -255,6 +256,7 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
         require(deadline >= block.timestamp, "Deadline passed");
 
         for (uint256 i = 0; i + 1 < tokens.length; i++) {
+            _verifyPoolFee(poolFees[i]);
             require(
                 twapProvider.isPairSupported(_normalizeToken(tokens[i]), _normalizeToken(tokens[i + 1]), poolFees[i]),
                 "Token pair not allowed"
@@ -265,11 +267,11 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
             amountOutMinimum = _twapMinOutMultihop(tokens, poolFees, amountIn);
         }
 
-        // Funds in, approve, and swap (scoped to free stack slots)
+        // Funds in, approve, and swap
         {
-            bool isNativeIn = (tokens[0] == address(0));
-            address actualTokenIn = isNativeIn ? address(wETH) : tokens[0];
+            address actualTokenIn = _normalizeToken(tokens[0]);
 
+            bool isNativeIn = tokens[0] == address(0);
             _takeFunds(actualTokenIn, amountIn, isNativeIn);
             _approveToken(actualTokenIn, amountIn);
 
@@ -290,10 +292,10 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
 
         require(amountOut >= amountOutMinimum, "Slippage limit exceeded");
 
-        // Payout (scoped to free stack slots)
         {
-            bool isNativeOut = (tokens[tokens.length - 1] == address(0));
-            address actualTokenOut = isNativeOut ? address(wETH) : tokens[tokens.length - 1];
+            address actualTokenOut = _normalizeToken(tokens[tokens.length - 1]);
+
+            bool isNativeOut = tokens[tokens.length - 1] == address(0);
             _sendFunds(actualTokenOut, msg.sender, amountOut, isNativeOut);
         }
 
@@ -321,25 +323,24 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
         require(amountOut > 0, "amountOut must be greater than zero");
         require(deadline >= block.timestamp, "Deadline passed");
 
-        // Per-hop whitelist (normalize inline to avoid extra locals)
         for (uint256 i = 0; i + 1 < tokens.length; i++) {
+            _verifyPoolFee(poolFees[i]);
             require(
                 twapProvider.isPairSupported(_normalizeToken(tokens[i]), _normalizeToken(tokens[i + 1]), poolFees[i]),
                 "Token pair not allowed"
             );
         }
 
-        // Auto-derive maxIn from chained TWAP if caller passed 0
         if (amountInMaximum == 0) {
             amountInMaximum = _twapMaxInMultihop(tokens, poolFees, amountOut);
         }
         require(amountInMaximum > 0, "amountInMaximum is zero");
 
-        // Funds in, approve, and swap (scoped to free stack slots)
+        // Funds in, approve, and swap
         {
-            bool isNativeIn = (tokens[0] == address(0));
-            address actualTokenIn = isNativeIn ? address(wETH) : tokens[0];
+            address actualTokenIn = _normalizeToken(tokens[0]);
 
+            bool isNativeIn = tokens[0] == address(0);
             _takeFunds(actualTokenIn, amountInMaximum, isNativeIn);
             _approveToken(actualTokenIn, amountInMaximum);
 
@@ -357,15 +358,15 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
 
             _approveToken(actualTokenIn, 0);
 
-            // Refund leftover input (if any)
+            // Refund leftover input
             if (amountIn < amountInMaximum) {
                 _sendFunds(actualTokenIn, msg.sender, amountInMaximum - amountIn, isNativeIn);
             }
         }
 
         {
-            bool isNativeOut = (tokens[tokens.length - 1] == address(0));
-            address actualTokenOut = isNativeOut ? address(wETH) : tokens[tokens.length - 1];
+            address actualTokenOut = _normalizeToken(tokens[tokens.length - 1]);
+            bool isNativeOut = tokens[tokens.length - 1] == address(0);
             _sendFunds(actualTokenOut, msg.sender, amountOut, isNativeOut);
         }
 
@@ -432,21 +433,18 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
         view
         returns (uint256)
     {
-        require(tokens.length >= 2, "path too short");
-        require(tokens.length == poolFees.length + 1, "fees mismatch");
+        uint32 _twapPeriod = _resolveTwapPeriod();
+        uint256 current = amountIn;
 
-        uint32 period = _resolveTwapPeriod();
-        uint256 running = amountIn;
-
-        for (uint256 i = 0; i < poolFees.length; i++) {
-            require(running <= type(uint128).max, "amount too large");
-            // No aIn / aOut / hopOut locals → fewer stack slots
-            (running,) = twapProvider.getTwapPrice(
-                _normalizeToken(tokens[i]), _normalizeToken(tokens[i + 1]), uint128(running), poolFees[i], period
+        for (uint256 i = 0; i < poolFees.length;) {
+            require(current <= type(uint128).max, "amount too large");
+            (current,) = twapProvider.getTwapPrice(
+                _normalizeToken(tokens[i]), _normalizeToken(tokens[i + 1]), uint128(current), poolFees[i], _twapPeriod
             );
+            i++;
         }
 
-        return (running * (10_000 - twapSlippageBps)) / 10_000;
+        return (current * (MAX_TWAP_SLIPPAGE_BPS - twapSlippageBps)) / MAX_TWAP_SLIPPAGE_BPS;
     }
 
     /**
@@ -461,21 +459,18 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
         view
         returns (uint256)
     {
-        require(tokens.length >= 2, "path too short");
-        require(tokens.length == poolFees.length + 1, "fees mismatch");
-
-        uint32 period = _resolveTwapPeriod();
-        uint256 running = amountOut;
+        uint32 _twapPeriod = _resolveTwapPeriod();
+        uint256 current = amountOut;
 
         for (uint256 i = poolFees.length; i > 0;) {
             i--;
-            require(running <= type(uint128).max, "amount too large");
-            (running,) = twapProvider.getTwapPrice(
-                _normalizeToken(tokens[i + 1]), _normalizeToken(tokens[i]), uint128(running), poolFees[i], period
+            require(current <= type(uint128).max, "amount too large");
+            (current,) = twapProvider.getTwapPrice(
+                _normalizeToken(tokens[i + 1]), _normalizeToken(tokens[i]), uint128(current), poolFees[i], _twapPeriod
             );
         }
 
-        return (running * (10_000 + twapSlippageBps)) / 10_000;
+        return (current * (MAX_TWAP_SLIPPAGE_BPS + twapSlippageBps)) / MAX_TWAP_SLIPPAGE_BPS;
     }
 
     /**
@@ -552,7 +547,7 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
         require(amountIn <= type(uint128).max, "amountIn too large");
         (uint256 twapOut,) =
             twapProvider.getTwapPrice(tokenIn, tokenOut, uint128(amountIn), poolFee, _resolveTwapPeriod());
-        minOut = (twapOut * (10_000 - twapSlippageBps)) / 10_000;
+        minOut = (twapOut * (MAX_TWAP_SLIPPAGE_BPS - twapSlippageBps)) / MAX_TWAP_SLIPPAGE_BPS;
     }
 
     /**
@@ -571,10 +566,10 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
         require(amountOut <= type(uint128).max, "amountOut too large");
         (uint256 twapIn,) =
             twapProvider.getTwapPrice(tokenOut, tokenIn, uint128(amountOut), poolFee, _resolveTwapPeriod());
-        maxIn = (twapIn * (10_000 + twapSlippageBps)) / 10_000;
+        maxIn = (twapIn * (MAX_TWAP_SLIPPAGE_BPS + twapSlippageBps)) / MAX_TWAP_SLIPPAGE_BPS;
     }
 
-    function _verifyPoolFee(uint24 poolFee) internal view {
+    function _verifyPoolFee(uint24 poolFee) internal pure {
         require(poolFee == 100 || poolFee == 500 || poolFee == 3000 || poolFee == 10000, "Invalid pool fee");
     }
 

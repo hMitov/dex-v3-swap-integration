@@ -18,11 +18,17 @@ interface ITWAPPriceProvider {
     /// @notice Emitted when a pair is removed
     event PairRemoved(bytes32 indexed pairId);
 
+    /// @notice Grant pauser role to `account`
     function grantPauserRole(address account) external;
+    /// @notice Revoke pauser role from `account`
     function revokePauserRole(address account) external;
+    /// @notice Pause the contract
     function pause() external;
+    /// @notice Unpause the contract
     function unpause() external;
+    /// @notice Add a new token pair
     function addTokenPair(address _token0, address _token1, address _pool, uint24 _fee) external;
+    /// @notice Remove a token pair
     function removeTokenPair(address _token0, address _token1, uint24 _fee) external;
 
     /// @notice Get TWAP quote for `_amountIn` of `_tokenIn` to `_tokenOut`

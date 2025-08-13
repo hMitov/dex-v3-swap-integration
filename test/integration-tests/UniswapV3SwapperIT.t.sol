@@ -79,7 +79,7 @@ contract UniswapV3SwapperITTest is Test {
     }
 
     // ============ SETUP & CONFIGURATION TESTS ============
-    
+
     function testSetup() public view {
         assertEq(address(swapper) != address(0), true, "Integration contract should be deployed");
         assertEq(user.balance, 100 ether, "User should have 100 ETH");
@@ -89,7 +89,7 @@ contract UniswapV3SwapperITTest is Test {
     }
 
     // ============ EXACT INPUT SINGLE-HOP INTEGRATION TESTS ============
-    
+
     function testSwapExactInput_WETHToUSDC_IT_SUCCESS() public {
         uint256 amountIn = 0.01 ether;
         uint256 amountOutMinimum = 0;
@@ -193,7 +193,7 @@ contract UniswapV3SwapperITTest is Test {
     }
 
     // ============ EXACT OUTPUT SINGLE-HOP INTEGRATION TESTS ============
-    
+
     function testSwapExactOutputSingle_WETHToUSDC_IT_SUCCESS() public {
         uint256 amountOut = 50 * 10 ** 6;
         uint256 amountInMaximum = 0.05 ether;
@@ -296,7 +296,7 @@ contract UniswapV3SwapperITTest is Test {
     }
 
     // ============ EXACT INPUT MULTIHOP INTEGRATION TESTS ============
-    
+
     function testSwapExactInputMultihop_WETHToUSDCToUSDT_IT_SUCCESS() public {
         uint256 amountIn = 0.1 ether;
         uint256 amountOutMinimum = 100; // Minimum 100 USDT
@@ -351,7 +351,7 @@ contract UniswapV3SwapperITTest is Test {
     }
 
     // ============ REVERT & ERROR TESTS ============
-    
+
     function testSwapExactInputMultihop_RevertsPairNotAllowed() public {
         uint256 amountIn = 0.1 ether;
         uint24[] memory poolFees = new uint24[](2);
@@ -432,7 +432,7 @@ contract UniswapV3SwapperITTest is Test {
     }
 
     // // ============ Exact Output Multihop Success Tests ============
-    
+
     function testSwapExactOutputMultihop_WETHToUSDCToUSDT_IT_SUCCESS() public {
         uint256 amountOut = 50 * 10 ** 6;
         uint256 amountInMaximum = 0.1 ether;
@@ -734,7 +734,7 @@ contract UniswapV3SwapperITTest is Test {
     }
 
     // ============ UTILITY & HELPER FUNCTIONS ============
-    
+
     function _swapWETHForUSDT(uint256 ethAmount) internal returns (uint256) {
         uint256 amountOutMinimum = 0;
         uint256 deadline = block.timestamp + 1 hours;

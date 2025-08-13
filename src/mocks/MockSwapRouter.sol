@@ -93,6 +93,6 @@ contract MockSwapRouter is ISwapRouter {
         IERC20(tokenToMint).transfer(params.recipient, params.amountOut);
         return mockAmountIn;
     }
-    
+
     function uniswapV3SwapCallback(int256, int256, bytes calldata) external override {}
 }

@@ -10,6 +10,10 @@ This repository implements a comprehensive Uniswap V3 swapping solution that com
 - **Pair allow-list** via TWAP provider (bidirectional based on normalized pairId)
 - **Reentrancy protection** and approval reset to 0
 
+**TWAP Auto-Calculation:**
+- **Exact Input Swaps:** When `amountOutMinimum = 0`, TWAP is automatically calculated to determine the minimum output
+- **Exact Output Swaps:** When `amountInMaximum = 0`, TWAP is automatically calculated to determine the maximum input
+
 ## Architecture
 
 The system operates through a clean separation of concerns where the `UniswapV3Swapper` handles swap execution while the `TWAPPriceProvider` manages price feeds and pair validation.
@@ -72,6 +76,32 @@ User → UniswapV3Swapper → Uniswap V3 Router/Pool
 - Explicit deadlines
 - Pair allow-list checks
 - Pausable operations
+
+## TWAP Behavior & Slippage Protection
+
+**Automatic TWAP Calculation:**
+The system automatically calculates TWAP-based slippage bounds when users pass 0 for min/max amounts, providing intelligent slippage protection without manual calculations.
+
+**Exact Input Swaps (`amountOutMinimum = 0`):**
+- TWAP price is consulted from the specified pool
+- Minimum output is calculated as: `TWAP_Price * (1 - twapSlippageBps/10000)`
+- Example: With 100 bps (1%) slippage, if TWAP shows 1000 USDC for 1 ETH, minimum becomes 990 USDC
+
+**Exact Output Swaps (`amountInMaximum = 0`):**
+- TWAP price is consulted from the specified pool  
+- Maximum input is calculated as: `TWAP_Price * (1 + twapSlippageBps/10000)`
+- Example: With 100 bps (1%) slippage, if TWAP shows 1 ETH for 1000 USDC, maximum becomes 1.01 ETH
+
+**Configuration:**
+- `twapSlippageBps`: Configurable slippage buffer (default: 100 = 1.00%)
+- `twapPeriod`: TWAP calculation period in seconds (0 = use provider default of 900s)
+- Both parameters can be adjusted by contract admin via `setTwapSlippageBps()` and `setTwapPeriod()`
+
+**Benefits:**
+- **User Experience:** No need to manually calculate slippage bounds
+- **Safety:** Automatic protection against price manipulation
+- **Flexibility:** Users can still override with manual min/max values
+- **Gas Efficiency:** Single TWAP call instead of multiple price checks
 
 ## Configuration (.env)
 
@@ -165,20 +195,22 @@ forge script script/DeployUniswapV3Swapper.s.sol:DeployUniswapV3SwapperScript \
 ## Usage Examples
 
 ### Exact-Input Single-Hop (WETH→USDC)
-With `amountOutMinimum=0` for automatic TWAP slippage:
+With `amountOutMinimum=0` for automatic TWAP slippage calculation:
 ```bash
 cast send <SWAPPER_ADDRESS> "swapExactInputSingle(address,address,uint256,uint24,uint256,uint256)" \
   $SEPOLIA_WETH_ADDRESS $SEPOLIA_USDC 100000000000000000 3000 $DEADLINE 0 \
   --private-key $DEPLOYER_PRIVATE_KEY --rpc-url $ETHEREUM_SEPOLIA_RPC_URL
 ```
+**Note:** When `amountOutMinimum=0`, the system automatically calculates the minimum output using TWAP price minus the configured slippage buffer.
 
 ### Exact-Output Single-Hop
-With `amountInMaximum=0` for automatic TWAP slippage:
+With `amountInMaximum=0` for automatic TWAP slippage calculation:
 ```bash
 cast send <SWAPPER_ADDRESS> "swapExactOutputSingle(address,address,uint256,uint256,uint24,uint256)" \
   $SEPOLIA_WETH_ADDRESS $SEPOLIA_USDC 1000000 0 3000 $DEADLINE \
   --private-key $DEPLOYER_PRIVATE_KEY --rpc-url $ETHEREUM_SEPOLIA_RPC_URL
 ```
+**Note:** When `amountInMaximum=0`, the system automatically calculates the maximum input using TWAP price plus the configured slippage buffer.
 
 ### Multihop Exact-Input
 Path: [WETH, USDC, DAI] with fees [3000, 10000]:
@@ -187,6 +219,7 @@ cast send <SWAPPER_ADDRESS> "swapExactInputMultihop(address[],uint24[],uint256,u
   "[$SEPOLIA_WETH_ADDRESS,$SEPOLIA_USDC,$SEPOLIA_DAI]" "[3000,10000]" 100000000000000000 0 $DEADLINE \
   --private-key $DEPLOYER_PRIVATE_KEY --rpc-url $ETHEREUM_SEPOLIA_RPC_URL
 ```
+**Note:** When `amountOutMinimum=0`, TWAP is calculated for the final hop to determine the minimum output across the entire path.
 
 ### Multihop Exact-Output
 Reversed path encoding with `amountInMaximum=0`:
@@ -195,11 +228,14 @@ cast send <SWAPPER_ADDRESS> "swapExactOutputMultihop(address[],uint24[],uint24[]
   "[$SEPOLIA_DAI,$SEPOLIA_USDC,$SEPOLIA_WETH_ADDRESS]" "[10000,3000]" 1000000 0 $DEADLINE \
   --private-key $DEPLOYER_PRIVATE_KEY --rpc-url $ETHEREUM_SEPOLIA_RPC_URL
 ```
+**Note:** When `amountInMaximum=0`, TWAP is calculated for the first hop to determine the maximum input across the entire path.
 
 **Notes:**
 - **Deadlines:** UTC timestamp (e.g., `$(date -d '+1 hour' +%s)`)
 - **Fee Tiers:** 500 (0.05%), 3000 (0.3%), 10000 (1%)
 - **TWAP Auto:** Pass 0 for min/max to use TWAP-derived bounds
+  - `amountOutMinimum=0` → Automatic TWAP calculation for minimum output
+  - `amountInMaximum=0` → Automatic TWAP calculation for maximum input
 - **Pair Validation:** Swaps revert if pair not allowed by TWAP provider
 
 ## Security & Operational Notes

@@ -48,11 +48,11 @@ contract UniswapV3SwapperTest is Test {
         mockTWAPProvider.addTokenPair(address(tokenA), address(tokenB), address(mockWETH), 3000);
         mockTWAPProvider.addTokenPair(address(tokenB), address(tokenC), address(mockWETH), 3000);
         mockTWAPProvider.addTokenPair(address(tokenA), address(tokenC), address(mockWETH), 3000);
-        
+
         mockTWAPProvider.addTokenPair(address(mockWETH), address(tokenA), address(mockWETH), 3000);
         mockTWAPProvider.addTokenPair(address(mockWETH), address(tokenB), address(mockWETH), 3000);
         mockTWAPProvider.addTokenPair(address(mockWETH), address(tokenC), address(mockWETH), 3000);
-        
+
         mockTWAPProvider.addTokenPair(address(tokenA), address(tokenB), address(mockWETH), 500);
         mockTWAPProvider.addTokenPair(address(tokenA), address(tokenB), address(mockWETH), 10000);
         mockTWAPProvider.addTokenPair(address(tokenB), address(tokenC), address(mockWETH), 500);
@@ -68,7 +68,7 @@ contract UniswapV3SwapperTest is Test {
     }
 
     // ============ CONSTRUCTOR & ROLE TESTS ============
-    
+
     function testConstructorArguments() public view {
         assertEq(address(swapper.router()), address(mockRouter));
         assertEq(address(swapper.wETH()), address(mockWETH));
@@ -107,7 +107,7 @@ contract UniswapV3SwapperTest is Test {
     }
 
     // ============ PAUSE/UNPAUSE TESTS ============
-    
+
     function testPause() public {
         vm.prank(admin);
         swapper.grantPauserRole(pauser);
@@ -138,7 +138,7 @@ contract UniswapV3SwapperTest is Test {
     }
 
     // ============ ROLE MANAGEMENT TESTS ============
-    
+
     function testGrantPauserRole() public {
         vm.prank(admin);
         swapper.grantPauserRole(user);
@@ -181,7 +181,7 @@ contract UniswapV3SwapperTest is Test {
     }
 
     // ============ TWAP CONFIGURATION TESTS ============
-    
+
     function testSetTwapPeriod_SUCCESS() public {
         vm.prank(admin);
         swapper.setTwapPeriod(100);
@@ -208,14 +208,14 @@ contract UniswapV3SwapperTest is Test {
         assertEq(swapper.twapSlippageBps(), 100);
     }
 
-    function testSetTwapSlippageBps_RevertsGreaterThan10000() public { 
+    function testSetTwapSlippageBps_RevertsGreaterThan10000() public {
         vm.prank(admin);
         vm.expectRevert("TWAP slippage buffer must be less than or equal to 100%");
         swapper.setTwapSlippageBps(10001);
     }
 
     // ============ EXACT INPUT SINGLE-HOP SWAP TESTS ============
-    
+
     function testSwapExactInput_WithERCTokens_Success() public {
         uint256 amountIn = 1000;
         uint256 amountOutMinimum = 900;
@@ -279,7 +279,7 @@ contract UniswapV3SwapperTest is Test {
 
         vm.stopPrank();
     }
-    
+
     function testSwapExactInput_SameTokenReverts() public {
         vm.prank(user);
         vm.expectRevert("tokenIn and tokenOut must differ");
@@ -647,7 +647,7 @@ contract UniswapV3SwapperTest is Test {
     }
 
     // ============ EXACT OUTPUT SINGLE-HOP SWAP TESTS ============
-    
+
     function testSwapExactOutput_ERC20ToERC20_Success() public {
         uint256 amountOut = 1000;
         uint256 amountInMaximum = 2000;
@@ -951,7 +951,7 @@ contract UniswapV3SwapperTest is Test {
     }
 
     // ============ TWAP INTEGRATION TESTS ============
-    
+
     function testTWAPProviderIntegration_Success() public view {
         assertTrue(mockTWAPProvider.isPairSupported(address(tokenA), address(tokenB), 3000));
         assertTrue(mockTWAPProvider.isPairSupported(address(mockWETH), address(tokenA), 3000));
@@ -988,7 +988,7 @@ contract UniswapV3SwapperTest is Test {
     }
 
     // ============ EXACT INPUT MULTIHOP SWAP TESTS ============
-    
+
     function testSwapExactInputMultihop_ERC20ToERC20ToERC20_Success() public {
         uint256 amountIn = 1000;
         uint256 amountOutMinimum = 800;
@@ -1222,7 +1222,7 @@ contract UniswapV3SwapperTest is Test {
     }
 
     // ============ EXACT OUTPUT MULTIHOP SWAP TESTS ============
-    
+
     function testSwapExactOutputMultihop_ERC20ToERC20ToERC20_Success() public {
         uint256 amountOut = 1000;
         uint256 amountInMaximum = 2000;
@@ -1906,7 +1906,7 @@ contract UniswapV3SwapperTest is Test {
     }
 
     // ============ UTILITY FUNCTION TESTS ============
-    
+
     function testNormalizeToken_WithZeroAddress() public {
         uint256 amountIn = 1 ether;
         uint256 amountOutMinimum = 900;
@@ -1996,7 +1996,7 @@ contract UniswapV3SwapperTest is Test {
     }
 
     // ============ PATH BUILDING TESTS ============
-    
+
     function testBuildPath_WithTwoTokens() public {
         uint256 amountIn = 1000;
         uint256 amountOutMinimum = 800;
@@ -2052,7 +2052,7 @@ contract UniswapV3SwapperTest is Test {
     }
 
     // ============ FUND TRANSFER TESTS ============
-    
+
     function testTakeFunds_WithExactETHAmount() public {
         uint256 amountIn = 1 ether;
         uint256 amountOutMinimum = 900;
@@ -2107,7 +2107,7 @@ contract UniswapV3SwapperTest is Test {
     }
 
     // ============ TWAP PERIOD RESOLUTION TESTS ============
-    
+
     function testResolveTwapPeriod_WithZeroPeriod() public {
         uint256 amountIn = 1000;
         uint256 amountOutMinimum = 900;

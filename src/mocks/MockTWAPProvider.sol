@@ -42,7 +42,7 @@ contract MockTWAPProvider is ITWAPPriceProvider {
 
     /// @notice Pause the mock TWAP provider
     /// @dev This function does nothing in the mock implementation
-    function pause() external override {}   
+    function pause() external override {}
 
     /// @notice Unpause the mock TWAP provider
     /// @dev This function does nothing in the mock implementation
