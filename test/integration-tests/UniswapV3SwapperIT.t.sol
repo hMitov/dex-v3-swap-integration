@@ -39,7 +39,7 @@ contract UniswapV3SwapperITTest is Test {
 
     function setUp() public {
         // Create fork
-        mainnetFork = vm.createFork(vm.envString("MAINNET_RPC_URL"));
+        mainnetFork = vm.createFork("https://ethereum-rpc.publicnode.com");
         vm.selectFork(mainnetFork);
 
         // Set up test accounts
