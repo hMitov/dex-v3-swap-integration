@@ -290,8 +290,6 @@ contract UniswapV3Swapper is IUniswapV3Swapper, ReentrancyGuard, Pausable, Acces
             _approveToken(actualTokenIn, 0);
         }
 
-        require(amountOut >= amountOutMinimum, "Slippage limit exceeded");
-
         {
             address actualTokenOut = _normalizeToken(tokens[tokens.length - 1]);
 

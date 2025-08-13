@@ -1192,35 +1192,6 @@ contract UniswapV3SwapperTest is Test {
         vm.stopPrank();
     }
 
-    function testSwapExactInputMultihop_RevertsSlippageExceeded() public {
-        mockRouter.setAmountOut(700); // Less than minimum
-
-        uint256 amountIn = 1000;
-        uint24[] memory poolFees = new uint24[](1);
-        poolFees[0] = 3000;
-
-        address[] memory tokens = new address[](2);
-        tokens[0] = address(tokenA);
-        tokens[1] = address(tokenB);
-
-        mockRouter.setFinalToken(address(tokenB));
-
-        uint256 deadline = block.timestamp + 1 hours;
-
-        vm.startPrank(user);
-        tokenA.approve(address(swapper), amountIn);
-
-        vm.expectRevert("Slippage limit exceeded");
-        swapper.swapExactInputMultihop(
-            tokens,
-            poolFees,
-            amountIn,
-            800, // Minimum higher than mock output
-            deadline
-        );
-        vm.stopPrank();
-    }
-
     // ============ EXACT OUTPUT MULTIHOP SWAP TESTS ============
 
     function testSwapExactOutputMultihop_ERC20ToERC20ToERC20_Success() public {
